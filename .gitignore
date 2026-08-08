@@ -1,0 +1,6 @@
+# Runtime state and secrets are never part of the repo; they live in ~/.agent-voice.
+*.mp3
+elevenlabs-key
+state/
+.DS_Store
+Thumbs.db
