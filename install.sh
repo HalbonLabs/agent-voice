@@ -30,7 +30,7 @@ KEYS="claude codex kimi"
 name_of()      { case "$1" in claude) echo "Claude Code";; codex) echo "Codex CLI";; kimi) echo "Kimi Code CLI";; esac; }
 note_of()      { case "$1" in
                    claude) echo "fully supported (summary + voice)";;
-                   codex)  echo "supported; checked against the docs, not yet run live";;
+                   codex)  echo "fully supported (summary + voice)";;
                    kimi)   echo "supported (summary + voice) via its session transcript";;
                  esac; }
 dir_of()       { case "$1" in claude) echo "$HOME/.claude";; codex) echo "$HOME/.codex";; kimi) echo "$HOME/.kimi-code";; esac; }

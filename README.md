@@ -30,7 +30,7 @@ You choose per session whether you want the audio, just the text, or nothing.
 | Agent          | Config file                     | Summary text | Spoken voice |
 | -------------- | ------------------------------- | ------------ | ------------ |
 | Claude Code    | `~/.claude/settings.json`       | Yes          | Yes          |
-| Codex CLI      | `~/.codex/hooks.json`           | Yes          | Yes (test it)|
+| Codex CLI      | `~/.codex/hooks.json`           | Yes          | Yes          |
 | Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Yes (via transcript) |
 
 Claude Code is fully built and tested end to end.
@@ -42,8 +42,8 @@ event, so per-session state and the `voice ...` commands work; `UserPromptSubmit
 stdout is "added as extra developer context", so the summary instruction lands;
 exit code 2 blocks a prompt with stderr as the reason, so the commands are
 intercepted; and `Stop` provides `last_assistant_message`. The `hooks.json` shape
-agent-voice writes also matches a working Codex hook. What has *not* happened is a
-live end-to-end run, so please still report anything odd.
+agent-voice writes also matches a working Codex hook. It has since been run live
+end to end on Codex and behaved correctly.
 
 There is a known upstream bug,
 [openai/codex#23784](https://github.com/openai/codex/issues/23784): on Windows,

@@ -30,7 +30,7 @@ function Get-Agents {
   $h = $env:USERPROFILE
   $defs = @(
     @{ Key='claude'; Name='Claude Code';   Note='fully supported (summary + voice)';                            Dir='.claude';    Cfg='.claude\settings.json' },
-    @{ Key='codex';  Name='Codex CLI';     Note='supported; checked against the docs, not yet run live';        Dir='.codex';     Cfg='.codex\hooks.json' },
+    @{ Key='codex';  Name='Codex CLI';     Note='fully supported (summary + voice)'                            ;        Dir='.codex';     Cfg='.codex\hooks.json' },
     @{ Key='kimi';   Name='Kimi Code CLI'; Note='supported (summary + voice) via its session transcript';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' }
   )
   foreach ($d in $defs) {
