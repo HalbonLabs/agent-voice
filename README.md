@@ -33,12 +33,28 @@ You choose per session whether you want the audio, just the text, or nothing.
 | Codex CLI      | `~/.codex/hooks.json`           | Yes          | Yes (test it)|
 | Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Pending      |
 
-Claude Code is fully built and tested. Codex uses the same hook events and fields
-(`UserPromptSubmit`, `Stop`, `last_assistant_message`), so it is supported the same
-way; please smoke-test it in your environment. Kimi supports the summary text via
-`UserPromptSubmit`, but its `Stop` event does not currently expose the assistant's
-final message, so spoken audio is pending upstream support. On Kimi it degrades
-gracefully: you still get the text TL;DR, just no sound.
+Claude Code is fully built and tested end to end.
+
+Codex is supported and its contract has been checked against the
+[Codex hooks reference](https://doc.jarvisuni.com/openai/codex/hooks.html), which
+confirms everything agent-voice relies on: `session_id` is a common field on every
+event, so per-session state and the `voice ...` commands work; `UserPromptSubmit`
+stdout is "added as extra developer context", so the summary instruction lands;
+exit code 2 blocks a prompt with stderr as the reason, so the commands are
+intercepted; and `Stop` provides `last_assistant_message`. The `hooks.json` shape
+agent-voice writes also matches a working Codex hook. What has *not* happened is a
+live end-to-end run, so please still report anything odd.
+
+One known upstream bug worth knowing on Windows:
+[openai/codex#23784](https://github.com/openai/codex/issues/23784) reports Codex
+sending malformed JSON to `Stop` hooks when the assistant message contains
+non-ASCII text. When that happens agent-voice cannot parse the payload and stays
+silent for that turn. It fails quietly rather than breaking anything.
+
+Kimi supports the summary text via `UserPromptSubmit`, but its `Stop` event does
+not currently expose the assistant's final message, so spoken audio is pending
+upstream support. On Kimi it degrades gracefully: you still get the text TL;DR,
+just no sound.
 
 ## How it works
 

@@ -27,7 +27,7 @@ Write-Host ("Installed scripts to " + $target)
 Write-Host ''
 Write-Host 'Which agents should use agent-voice? (comma-separated)'
 Write-Host '  claude   Claude Code       fully supported (summary + voice)'
-Write-Host '  codex    Codex CLI         fully supported (summary + voice); please smoke-test'
+Write-Host '  codex    Codex CLI         supported (summary + voice); checked against the docs, not yet run live'
 Write-Host '  kimi     Kimi Code CLI     summary text supported; voice pending upstream support'
 Write-Host ''
 $agents = Read-Host 'Agents (Enter for claude)'
