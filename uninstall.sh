@@ -2,6 +2,11 @@
 # agent-voice uninstaller (macOS/Linux). Removes hooks from all agents and (optionally) the files.
 TARGET="$HOME/.agent-voice"
 
+# Stop the Kokoro daemon first, if one is resident, so its memory is freed now.
+if [ -f "$TARGET/kokoro_serve.py" ]; then
+  python3 "$TARGET/kokoro_serve.py" "$TARGET/state" --quit >/dev/null 2>&1 || true
+fi
+
 if [ -f "$TARGET/lib/register.mjs" ]; then
   node "$TARGET/lib/register.mjs" mode=uninstall home="$HOME"
 else

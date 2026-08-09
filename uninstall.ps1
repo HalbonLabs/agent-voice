@@ -2,6 +2,10 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $target = Join-Path $env:USERPROFILE '.agent-voice'
 
+# Stop the Kokoro daemon first, if one is resident, so its memory is freed now.
+$serve = Join-Path $target 'kokoro_serve.py'
+if (Test-Path $serve) { python $serve (Join-Path $target 'state') --quit 2>$null }
+
 $reg = Join-Path $target 'lib\register.mjs'
 if (Test-Path $reg) {
   node $reg mode=uninstall home=$env:USERPROFILE

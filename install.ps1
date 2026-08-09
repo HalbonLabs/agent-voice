@@ -19,6 +19,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $target 'lib') | Out-Null
 Copy-Item (Join-Path $src 'core\windows\*') $target -Force
+Copy-Item (Join-Path $src 'core\kokoro*.py') $target -Force
 Copy-Item (Join-Path $src 'lib\*') (Join-Path $target 'lib') -Force
 Write-Host ("Installed scripts to " + $target)
 
@@ -38,9 +39,10 @@ Write-Host ''
 Write-Host 'Choose a voice engine:'
 Write-Host '  [1] edge-tts (Ava)   Free, natural. Short summary text sent to Microsoft. Needs Python. Quality: very good.'
 Write-Host '  [2] ElevenLabs       Top quality. Uses your API key; summary text sent to ElevenLabs. Quality: best.'
-Write-Host '  [3] Native offline   Fully private, nothing leaves the machine. Quality: robotic.'
+Write-Host '  [3] Kokoro offline   Free, natural, fully private. Needs Python + ~300MB weights. Quality: good.'
+Write-Host '  [4] Native offline   Fully private, no downloads, nothing to install. Quality: robotic.'
 Write-Host ''
-$choice = Read-Host 'Enter 1, 2, or 3'
+$choice = Read-Host 'Enter 1, 2, 3, or 4'
 
 $cfg = @()
 switch ($choice) {
@@ -54,6 +56,36 @@ switch ($choice) {
     Write-Host 'ElevenLabs selected. Key stored locally (not in any script).' -ForegroundColor Green
   }
   '3' {
+    $kv = Read-Host 'Kokoro voice (Enter for British female "bf_emma")'
+    if ([string]::IsNullOrWhiteSpace($kv)) { $kv = 'bf_emma' }
+    $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
+    Write-Host 'Kokoro offline selected. Nothing will leave this machine.' -ForegroundColor Green
+
+    Write-Host 'Kokoro keeps a warm background process so replies start speaking in ~1.7s.' -ForegroundColor Gray
+    Write-Host 'It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes.' -ForegroundColor Gray
+
+    # espeak-ng is not required: the espeakng-loader dependency bundles it.
+    $have = $false
+    try { python -c 'import kokoro, soundfile' *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
+    if (-not $have) {
+      Write-Host 'Installing Kokoro (pip install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes.'
+      python -m pip install --user kokoro soundfile
+    }
+
+    # Warm up: pre-download the weights and the spaCy model that Kokoro's text
+    # front-end fetches on first use, so the first spoken reply is not silent.
+    Write-Host 'Downloading Kokoro voice weights (~300MB) and language model (one time) ...'
+    $probe = Join-Path $state 'warmup.wav'
+    'agent voice is ready' | python (Join-Path $target 'kokoro-tts.py') $probe $kv 1.15
+    if ((Test-Path $probe) -and ((Get-Item $probe).Length -gt 500)) {
+      Write-Host 'Kokoro is working.' -ForegroundColor Green
+      Remove-Item $probe -Force -ErrorAction SilentlyContinue
+    } else {
+      Write-Host 'Kokoro could not synthesise yet. Voice will use the basic Windows one until this is fixed;' -ForegroundColor Yellow
+      Write-Host 'run the pip install above by hand to see the error.' -ForegroundColor Yellow
+    }
+  }
+  '4' {
     $cfg += 'engine=native'
     Write-Host 'Native offline selected.' -ForegroundColor Green
   }

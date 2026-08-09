@@ -1,6 +1,9 @@
 # Runtime state and secrets are never part of the repo; they live in ~/.agent-voice.
 *.mp3
+*.wav
 elevenlabs-key
 state/
+__pycache__/
+*.pyc
 .DS_Store
 Thumbs.db

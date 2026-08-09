@@ -86,11 +86,51 @@ The installer offers three, with a description of each:
 | ----------------- | --------- | ------------- | -------------------------------------- | ------- |
 | edge-tts (Ava)    | Very good | Free          | Summary text sent to Microsoft's TTS   | Python  |
 | ElevenLabs        | Best      | Your API plan | Summary text sent to ElevenLabs        | API key |
+| Kokoro offline    | Good      | Free          | Nothing leaves the machine             | Python, ~300 MB |
 | Native offline    | Robotic   | Free          | Nothing leaves the machine             | Nothing |
 
 Only the short summary paragraph is ever sent anywhere. Your full conversation,
 code, and files are never sent by agent-voice. For everything to stay on the
-machine, choose Native offline.
+machine, choose Kokoro or Native.
+
+**Kokoro** is the pick if you want a natural voice with nothing leaving your
+machine. It runs [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), an
+Apache-2.0 open-weights model, locally on the CPU, and gives you 54 voices across
+9 languages, all inside the one download, so switching voice costs nothing.
+
+It is also the fastest engine here, because it does not wait on a network round
+trip. Measured on CPU with torch 2.13:
+
+| Engine | Time to produce the audio |
+| ------ | ------------------------- |
+| Kokoro, warm | **1.7s** |
+| edge-tts | 2.6s |
+| Kokoro, first reply after install | ~12s |
+
+Those are synthesis times, measured the same way for both. The hook itself adds
+about a second of process startup on top, whichever engine you pick.
+
+That needs one piece of machinery to be true. A fresh Python process spends 6.2s
+importing PyTorch and 2.4s building the pipeline before it does 1.6s of actual
+synthesis, and the Stop hook runs a fresh process every reply. So agent-voice
+keeps a **warm daemon** (`kokoro_serve.py`): the model loads once, and each reply
+is just the 1.6s of synthesis. Details:
+
+- It listens on loopback only, on an OS-assigned port, and requires a token from
+  a file only your account can read. It will only write into its own state dir.
+- It costs about 1.7 GB of RAM while resident, and exits by itself after 15 idle
+  minutes. `uninstall` shuts it down immediately.
+- If it is not running, synthesis still works, it just takes the slow ~12s path
+  and starts a daemon for next time. There is nothing to manage by hand.
+
+You do not need to install `espeak-ng` separately: the `espeakng-loader`
+dependency bundles it. The installer pre-fetches the weights and a small spaCy
+language model, and warms the daemon, so your first spoken reply is quick.
+
+**Native** stays the zero-dependency floor: it installs nothing, downloads
+nothing, and uses the voice already built into Windows or macOS. It just sounds
+robotic. Every engine falls back to Native if it fails, so agent-voice degrades
+to "sounds basic" rather than going silent.
 
 ## Daily use
 
@@ -120,6 +160,11 @@ Edit `~/.agent-voice/config`:
   `en-US-AvaNeural`. List voices with `python -m edge_tts --list-voices`.
 - ElevenLabs: set `eleven_voice` to a voice id. Free accounts can use only the
   built-in premade voices via the API; paid accounts unlock the premium library.
+- Kokoro: set `kokoro_voice`, for example `bf_emma` (British female, the default),
+  `bm_george` (British male) or `af_heart` (American female), and `kokoro_speed`
+  (1.0 is normal, default 1.15). The first letter picks the language, so `b` is
+  British English and `a` is American. Full list:
+  [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md).
 - Native (macOS): set `native_voice` to an installed voice name.
 
 ## Uninstall
@@ -137,6 +182,9 @@ Everything installs to `~/.agent-voice`:
 - `voice-context.*` and `speak.*`   the two hook scripts
 - `config`                          your engine and voice choices
 - `elevenlabs-key`                  your key, if you chose ElevenLabs (local only)
+- `kokoro-tts.py`                   local synthesiser (Kokoro engine only)
+- `kokoro_serve.py`                 warm daemon that keeps the model loaded
+- `kokoro_engine.py`                the synthesis itself, shared by those two
 - `lib/*.mjs`                       small Node helpers (JSON parsing, config merge)
 - `state/`                          per-session flags and temp audio
 
@@ -149,8 +197,9 @@ touched.
 
 agent-voice only ever sends the short `<spoken>` summary to a cloud voice engine,
 and only if you choose edge-tts or ElevenLabs. It never sends your prompts, the
-full replies, your code, or your files anywhere. Choose Native offline if you want
-zero network calls.
+full replies, your code, or your files anywhere. Choose Kokoro or Native for zero
+network calls at speaking time. Kokoro downloads its weights once at install and
+is fully local from then on; Native never touches the network at all.
 
 ## License
 

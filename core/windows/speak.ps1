@@ -46,6 +46,7 @@ if ([string]::IsNullOrWhiteSpace($text)) { exit 0 }
 $tag     = if ($sid) { $sid } else { 'nosession' }
 $pidFile = Join-Path $state "speak.$tag.pid"
 $mp3     = Join-Path $state "say.$tag.mp3"
+$wav     = Join-Path $state "say.$tag.wav"
 $alias   = "ccvoice$PID"
 
 # Cut off this session's previous turn if it is still speaking.
@@ -55,24 +56,55 @@ if (Test-Path $pidFile) {
 }
 $PID | Set-Content $pidFile
 
+# MCI player for MP3. Returns $true only if playback actually happened: MCI fails
+# silently otherwise (notably rc=304 when the path exceeds ~128 chars), and a
+# silent failure must fall through to SAPI rather than pass for success.
 function Play-Mp3 ($file, $al) {
   Add-Type -Name Mci -Namespace Native -MemberDefinition @'
 [DllImport("winmm.dll", CharSet = CharSet.Auto)]
 public static extern int mciSendString(string cmd, System.Text.StringBuilder ret, int len, System.IntPtr hwnd);
 '@
-  [Native.Mci]::mciSendString("open `"$file`" type mpegvideo alias $al", $null, 0, [IntPtr]::Zero) | Out-Null
-  [Native.Mci]::mciSendString("play $al wait", $null, 0, [IntPtr]::Zero) | Out-Null
+  if ([Native.Mci]::mciSendString("open `"$file`" type mpegvideo alias $al", $null, 0, [IntPtr]::Zero) -ne 0) { return $false }
+  $rc = [Native.Mci]::mciSendString("play $al wait", $null, 0, [IntPtr]::Zero)
   [Native.Mci]::mciSendString("close $al", $null, 0, [IntPtr]::Zero) | Out-Null
+  return ($rc -eq 0)
+}
+
+# WAV playback via SoundPlayer, not MCI: it plays WAV natively, blocks until the
+# audio finishes, and has none of MCI's path-length limits.
+function Play-Wav ($file) {
+  try {
+    $player = New-Object System.Media.SoundPlayer $file
+    $player.PlaySync()
+    $player.Dispose()
+    return $true
+  } catch { return $false }
 }
 
 $spoke = $false
 Remove-Item $mp3 -Force
+Remove-Item $wav -Force
 
 if ($engine -eq 'edge') {
   $voice = if ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
   $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
   python -m edge_tts --text "$text" --voice $voice --rate=$rate --write-media "$mp3" 2>$null
-  if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { Play-Mp3 $mp3 $alias; $spoke = $true }
+  if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
+}
+elseif ($engine -eq 'kokoro') {
+  # Offline neural voice. Slow to start: ~8.6s of process startup on every turn
+  # (fresh process each time) plus ~1.6s synthesis, so ~10-12s before audio.
+  # The very first call ever also downloads weights; that turn falls back to SAPI.
+  $voice = if ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
+  $speed = if ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
+  $py    = Join-Path $root 'kokoro-tts.py'
+  if (Test-Path $py) {
+    $prev = $OutputEncoding
+    $OutputEncoding = New-Object Text.UTF8Encoding $false
+    $text | python $py $wav $voice $speed 2>$null
+    $OutputEncoding = $prev
+    if ((Test-Path $wav) -and ((Get-Item $wav).Length -gt 500)) { $spoke = Play-Wav $wav }
+  }
 }
 elseif ($engine -eq 'elevenlabs') {
   $keyFile = Join-Path $root 'elevenlabs-key'
@@ -86,7 +118,7 @@ elseif ($engine -eq 'elevenlabs') {
       $bytes = [Text.Encoding]::UTF8.GetBytes($body)
       $uri = "https://api.elevenlabs.io/v1/text-to-speech/$voice`?output_format=mp3_44100_128"
       Invoke-WebRequest -Uri $uri -Method Post -Headers @{ 'xi-api-key' = $key } -ContentType 'application/json' -Body $bytes -OutFile $mp3 -TimeoutSec 20 -UseBasicParsing
-      if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { Play-Mp3 $mp3 $alias; $spoke = $true }
+      if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
     } catch { $spoke = $false }
   }
 }
@@ -101,5 +133,6 @@ if (-not $spoke) {
 }
 
 Remove-Item $mp3 -Force
+Remove-Item $wav -Force
 Remove-Item $pidFile
 exit 0
