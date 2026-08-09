@@ -18,8 +18,25 @@ $engine = if ($cfg.engine) { $cfg.engine } else { 'edge' }
 
 $raw = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
-try { $j = $raw | ConvertFrom-Json } catch { exit 0 }
-$sid = [string]$j.session_id
+
+# Fast path: parse the payload. Slow path: Codex on Windows can send malformed JSON
+# when the reply contains non-ASCII text (openai/codex#23784), so rather than going
+# silent, salvage the two fields we need with the shared Node helper.
+$j = $null
+try { $j = $raw | ConvertFrom-Json } catch { $j = $null }
+if ($j) {
+  $sid = [string]$j.session_id
+  $msg = [string]$j.last_assistant_message
+} else {
+  $getter = Join-Path $root 'lib\json-get.mjs'
+  if (-not (Test-Path $getter)) { exit 0 }
+  $prevEnc = $OutputEncoding
+  $OutputEncoding = New-Object Text.UTF8Encoding $false
+  # -join because PowerShell hands back multi-line output as an array of lines.
+  $sid = (($raw | node $getter session_id) -join '').Trim()
+  $msg = ($raw | node $getter last_assistant_message) -join "`n"
+  $OutputEncoding = $prevEnc
+}
 
 $globalOn = Join-Path $state 'voice-on'
 $onFlag   = if ($sid) { Join-Path $state "on.$sid" }
@@ -45,7 +62,6 @@ if ($sid) {
   }
 }
 
-$msg = [string]$j.last_assistant_message
 if ([string]::IsNullOrWhiteSpace($msg)) { exit 0 }
 $m = [regex]::Match($msg, '(?s)<spoken>(.*?)</spoken>')
 if (-not $m.Success) { exit 0 }

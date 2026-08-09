@@ -23,8 +23,24 @@ if (Test-Path $cfgFile) {
 
 $raw = [Console]::In.ReadToEnd()
 try { $j = $raw | ConvertFrom-Json } catch { $j = $null }
-$sid    = if ($j) { [string]$j.session_id } else { '' }
-$prompt = if ($j) { [string]$j.prompt } else { '' }
+if ($j) {
+  $sid    = [string]$j.session_id
+  $prompt = [string]$j.prompt
+} else {
+  # This event carries last_assistant_message too, so it is exposed to the same
+  # malformed-JSON bug as the Stop hook (openai/codex#23784). Salvage rather than
+  # lose the session id, which would break the voice commands.
+  $sid = ''; $prompt = ''
+  $getter = Join-Path $root 'lib\json-get.mjs'
+  if ((Test-Path $getter) -and -not [string]::IsNullOrWhiteSpace($raw)) {
+    $prevEnc = $OutputEncoding
+    $OutputEncoding = New-Object Text.UTF8Encoding $false
+    # -join because PowerShell hands back multi-line output as an array of lines.
+    $sid    = (($raw | node $getter session_id) -join '').Trim()
+    $prompt = ($raw | node $getter prompt) -join "`n"
+    $OutputEncoding = $prevEnc
+  }
+}
 
 $globalOn = Join-Path $state 'voice-on'
 $onFlag   = if ($sid) { Join-Path $state "on.$sid" }

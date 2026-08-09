@@ -45,11 +45,15 @@ intercepted; and `Stop` provides `last_assistant_message`. The `hooks.json` shap
 agent-voice writes also matches a working Codex hook. What has *not* happened is a
 live end-to-end run, so please still report anything odd.
 
-One known upstream bug worth knowing on Windows:
-[openai/codex#23784](https://github.com/openai/codex/issues/23784) reports Codex
-sending malformed JSON to `Stop` hooks when the assistant message contains
-non-ASCII text. When that happens agent-voice cannot parse the payload and stays
-silent for that turn. It fails quietly rather than breaking anything.
+There is a known upstream bug,
+[openai/codex#23784](https://github.com/openai/codex/issues/23784): on Windows,
+Codex sends hooks malformed JSON when the assistant message contains non-ASCII
+text, typically leaving a string unterminated. That is easy to hit, since a single
+curly quote or emoji anywhere in a reply is enough. agent-voice works around it:
+when the payload will not parse, it scrapes `session_id` and the `<spoken>` block
+straight out of the raw text and unescapes them, so the reply is still spoken and
+the `voice ...` commands still work. Verified against a payload reproducing the
+bug, on both hooks.
 
 Kimi supports the summary text via `UserPromptSubmit`, but its `Stop` event does
 not currently expose the assistant's final message, so spoken audio is pending
