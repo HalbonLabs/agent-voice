@@ -140,6 +140,122 @@ deny_python_engine() {
   echo "Using Native offline for now, so you still get a working voice."
 }
 
+# Kokoro's voices, with the quality grades published in the model's own VOICES.md.
+# The grades vary a lot, so they are shown rather than hidden: bf_emma is the best
+# British voice at B-, while every British male tops out at C.
+KOKORO_VOICES=(
+  "bf_emma|British|Female|B-"      "bf_isabella|British|Female|C"   "bf_alice|British|Female|D"
+  "bf_lily|British|Female|D"       "bm_fable|British|Male|C"        "bm_george|British|Male|C"
+  "bm_lewis|British|Male|D+"       "bm_daniel|British|Male|D"
+  "af_heart|American|Female|A"     "af_bella|American|Female|A-"    "af_nicole|American|Female|B-"
+  "af_aoede|American|Female|C+"    "af_kore|American|Female|C+"     "af_sarah|American|Female|C+"
+  "af_alloy|American|Female|C"     "af_nova|American|Female|C"      "af_sky|American|Female|C-"
+  "af_jessica|American|Female|D"   "af_river|American|Female|D"
+  "am_fenrir|American|Male|C+"     "am_michael|American|Male|C+"    "am_puck|American|Male|C+"
+  "am_echo|American|Male|D"        "am_eric|American|Male|D"        "am_liam|American|Male|D"
+  "am_onyx|American|Male|D"        "am_santa|American|Male|D-"      "am_adam|American|Male|F+"
+  "ff_siwis|French|Female|B-"
+  "jf_alpha|Japanese|Female|C+"    "jf_gongitsune|Japanese|Female|C" "jf_tebukuro|Japanese|Female|C"
+  "jf_nezumi|Japanese|Female|C-"   "jm_kumo|Japanese|Male|C-"
+  "hf_alpha|Hindi|Female|C"        "hf_beta|Hindi|Female|C"         "hm_omega|Hindi|Male|C"
+  "hm_psi|Hindi|Male|C"
+  "if_sara|Italian|Female|C"       "im_nicola|Italian|Male|C"
+  "zf_xiaoxiao|Mandarin|Female|D"  "zf_xiaobei|Mandarin|Female|D"   "zf_xiaoni|Mandarin|Female|D"
+  "zf_xiaoyi|Mandarin|Female|D"    "zm_yunjian|Mandarin|Male|D"     "zm_yunxi|Mandarin|Male|D"
+  "zm_yunxia|Mandarin|Male|D"      "zm_yunyang|Mandarin|Male|D"
+  "ef_dora|Spanish|Female|-"       "em_alex|Spanish|Male|-"         "em_santa|Spanish|Male|-"
+  "pf_dora|Portuguese|Female|-"    "pm_alex|Portuguese|Male|-"      "pm_santa|Portuguese|Male|-"
+)
+
+# Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
+# selection happens after the model has been pre-loaded.
+preview_voice() {
+  pv_wav="$STATE/preview.wav"
+  rm -f "$pv_wav"
+  printf 'This is how I will read your summaries back to you.' \
+    | python3 "$TARGET/kokoro-tts.py" "$pv_wav" "$1" 1.15 >/dev/null 2>&1
+  if [ -s "$pv_wav" ] && [ "$(wc -c < "$pv_wav")" -gt 500 ]; then
+    afplay "$pv_wav" >/dev/null 2>&1
+    rm -f "$pv_wav"
+    return 0
+  fi
+  return 1
+}
+
+# Single-select list with a scrolling viewport and audio preview. Sets $chosen_voice.
+select_voice() {
+  default_voice="$1"
+  total=${#KOKORO_VOICES[@]}
+
+  if [ ! -t 0 ]; then
+    printf 'Kokoro voice (Enter for British female "%s"): ' "$default_voice"
+    read -r typed
+    chosen_voice="${typed:-$default_voice}"
+    return
+  fi
+
+  vpos=0
+  i=0
+  for entry in "${KOKORO_VOICES[@]}"; do
+    [ "${entry%%|*}" = "$default_voice" ] && vpos=$i
+    i=$((i + 1))
+  done
+  view=12
+  [ "$total" -lt "$view" ] && view=$total
+  vrows=$((view + 2))
+  vstart=0
+  status="Press P to hear the highlighted voice."
+  pending=0
+  first=1
+
+  while :; do
+    [ "$vpos" -lt "$vstart" ] && vstart=$vpos
+    [ "$vpos" -ge $((vstart + view)) ] && vstart=$((vpos - view + 1))
+
+    [ "$first" = 1 ] || printf '\033[%dA' "$vrows"
+    first=0
+
+    i=$vstart
+    while [ "$i" -lt $((vstart + view)) ]; do
+      entry="${KOKORO_VOICES[$i]}"
+      vid="${entry%%|*}"; rest="${entry#*|}"
+      vlang="${rest%%|*}"; rest="${rest#*|}"
+      vsex="${rest%%|*}"; vgrade="${rest##*|}"
+      if [ "$i" = "$vpos" ]; then cur=">"; else cur=" "; fi
+      printf '\033[K%s %-14s %-11s %-7s grade %s\n' "$cur" "$vid" "$vlang" "$vsex" "$vgrade"
+      i=$((i + 1))
+    done
+    printf '\033[K  showing %d-%d of %d   Up/Down to move, P to preview, Enter to choose\n' \
+      "$((vstart + 1))" "$((vstart + view))" "$total"
+    printf '\033[K  %s\n' "$status"
+
+    if [ "$pending" = 1 ]; then
+      pending=0
+      cur_id="${KOKORO_VOICES[$vpos]%%|*}"
+      if preview_voice "$cur_id"; then
+        status="Played $cur_id. Press P again, or Enter to choose it."
+      else
+        status="Could not synthesise $cur_id. Try another."
+      fi
+      continue
+    fi
+
+    IFS= read -rsn1 ch
+    if [ "$ch" = "$(printf '\033')" ]; then
+      IFS= read -rsn2 -t 0.1 rest2
+      case "$rest2" in
+        '[A') vpos=$(((vpos - 1 + total) % total)) ;;
+        '[B') vpos=$(((vpos + 1) % total)) ;;
+      esac
+      continue
+    fi
+    case "$ch" in
+      p|P) status="Synthesising ${KOKORO_VOICES[$vpos]%%|*} ..."; pending=1 ;;
+      '')  echo ""; chosen_voice="${KOKORO_VOICES[$vpos]%%|*}"; return ;;
+    esac
+  done
+}
+
 # Choose engine.
 echo ""
 echo "Choose a voice engine:"
@@ -169,16 +285,12 @@ case "$choice" in
       deny_python_engine "Kokoro"
       echo "engine=native" >> "$CFG"
     else
-      printf 'Kokoro voice (Enter for British female "bf_emma"): '
-      read -r kv; [ -z "$kv" ] && kv="bf_emma"
-      echo "engine=kokoro" >> "$CFG"
-      echo "kokoro_voice=$kv" >> "$CFG"
-      echo "kokoro_speed=1.15" >> "$CFG"
       echo "Kokoro offline selected. Nothing will leave this machine."
-
       echo "Kokoro keeps a warm background process so replies start speaking in ~1.7s."
       echo "It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes."
 
+      # Dependencies and the model come first, so that voice previews are quick when
+      # you get to the list rather than costing ten seconds each.
       # espeak-ng is not required: the espeakng-loader dependency bundles it.
       if ! python3 -c 'import kokoro, soundfile' >/dev/null 2>&1; then
         echo "Installing Kokoro (pip3 install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes."
@@ -189,14 +301,26 @@ case "$choice" in
       # front-end fetches on first use, so the first spoken reply is not silent.
       echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
       probe="$STATE/warmup.wav"
-      printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "$kv" 1.15 || true
-      if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then
+      printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "bf_emma" 1.15 || true
+      kokoro_works=0
+      if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then kokoro_works=1; fi
+      rm -f "$probe"
+
+      if [ "$kokoro_works" = 1 ]; then
         echo "Kokoro is working."
-        rm -f "$probe"
+        echo ""
+        select_voice "bf_emma"
+        kv="$chosen_voice"
       else
         echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
         echo "run the pip3 install above by hand to see the error."
+        kv="bf_emma"
       fi
+
+      echo "engine=kokoro" >> "$CFG"
+      echo "kokoro_voice=$kv" >> "$CFG"
+      echo "kokoro_speed=1.15" >> "$CFG"
+      echo "Voice: $kv"
     fi
     ;;
   4)

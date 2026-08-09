@@ -147,6 +147,154 @@ function Deny-PythonEngine ($engineName) {
   Write-Host 'Using Native offline for now, so you still get a working voice.' -ForegroundColor Green
 }
 
+# Kokoro's voices, with the quality grades published in the model's own VOICES.md.
+# The grades vary a lot, so they are shown rather than hidden: bf_emma is the best
+# British voice at B-, while every British male tops out at C.
+$KOKORO_VOICES = @(
+  @{ Id='bf_emma';       Lang='British';  Sex='Female'; Grade='B-' },
+  @{ Id='bf_isabella';   Lang='British';  Sex='Female'; Grade='C'  },
+  @{ Id='bf_alice';      Lang='British';  Sex='Female'; Grade='D'  },
+  @{ Id='bf_lily';       Lang='British';  Sex='Female'; Grade='D'  },
+  @{ Id='bm_fable';      Lang='British';  Sex='Male';   Grade='C'  },
+  @{ Id='bm_george';     Lang='British';  Sex='Male';   Grade='C'  },
+  @{ Id='bm_lewis';      Lang='British';  Sex='Male';   Grade='D+' },
+  @{ Id='bm_daniel';     Lang='British';  Sex='Male';   Grade='D'  },
+  @{ Id='af_heart';      Lang='American'; Sex='Female'; Grade='A'  },
+  @{ Id='af_bella';      Lang='American'; Sex='Female'; Grade='A-' },
+  @{ Id='af_nicole';     Lang='American'; Sex='Female'; Grade='B-' },
+  @{ Id='af_aoede';      Lang='American'; Sex='Female'; Grade='C+' },
+  @{ Id='af_kore';       Lang='American'; Sex='Female'; Grade='C+' },
+  @{ Id='af_sarah';      Lang='American'; Sex='Female'; Grade='C+' },
+  @{ Id='af_alloy';      Lang='American'; Sex='Female'; Grade='C'  },
+  @{ Id='af_nova';       Lang='American'; Sex='Female'; Grade='C'  },
+  @{ Id='af_sky';        Lang='American'; Sex='Female'; Grade='C-' },
+  @{ Id='af_jessica';    Lang='American'; Sex='Female'; Grade='D'  },
+  @{ Id='af_river';      Lang='American'; Sex='Female'; Grade='D'  },
+  @{ Id='am_fenrir';     Lang='American'; Sex='Male';   Grade='C+' },
+  @{ Id='am_michael';    Lang='American'; Sex='Male';   Grade='C+' },
+  @{ Id='am_puck';       Lang='American'; Sex='Male';   Grade='C+' },
+  @{ Id='am_echo';       Lang='American'; Sex='Male';   Grade='D'  },
+  @{ Id='am_eric';       Lang='American'; Sex='Male';   Grade='D'  },
+  @{ Id='am_liam';       Lang='American'; Sex='Male';   Grade='D'  },
+  @{ Id='am_onyx';       Lang='American'; Sex='Male';   Grade='D'  },
+  @{ Id='am_santa';      Lang='American'; Sex='Male';   Grade='D-' },
+  @{ Id='am_adam';       Lang='American'; Sex='Male';   Grade='F+' },
+  @{ Id='ff_siwis';      Lang='French';   Sex='Female'; Grade='B-' },
+  @{ Id='jf_alpha';      Lang='Japanese'; Sex='Female'; Grade='C+' },
+  @{ Id='jf_gongitsune'; Lang='Japanese'; Sex='Female'; Grade='C'  },
+  @{ Id='jf_tebukuro';   Lang='Japanese'; Sex='Female'; Grade='C'  },
+  @{ Id='jf_nezumi';     Lang='Japanese'; Sex='Female'; Grade='C-' },
+  @{ Id='jm_kumo';       Lang='Japanese'; Sex='Male';   Grade='C-' },
+  @{ Id='hf_alpha';      Lang='Hindi';    Sex='Female'; Grade='C'  },
+  @{ Id='hf_beta';       Lang='Hindi';    Sex='Female'; Grade='C'  },
+  @{ Id='hm_omega';      Lang='Hindi';    Sex='Male';   Grade='C'  },
+  @{ Id='hm_psi';        Lang='Hindi';    Sex='Male';   Grade='C'  },
+  @{ Id='if_sara';       Lang='Italian';  Sex='Female'; Grade='C'  },
+  @{ Id='im_nicola';     Lang='Italian';  Sex='Male';   Grade='C'  },
+  @{ Id='zf_xiaoxiao';   Lang='Mandarin'; Sex='Female'; Grade='D'  },
+  @{ Id='zf_xiaobei';    Lang='Mandarin'; Sex='Female'; Grade='D'  },
+  @{ Id='zf_xiaoni';     Lang='Mandarin'; Sex='Female'; Grade='D'  },
+  @{ Id='zf_xiaoyi';     Lang='Mandarin'; Sex='Female'; Grade='D'  },
+  @{ Id='zm_yunjian';    Lang='Mandarin'; Sex='Male';   Grade='D'  },
+  @{ Id='zm_yunxi';      Lang='Mandarin'; Sex='Male';   Grade='D'  },
+  @{ Id='zm_yunxia';     Lang='Mandarin'; Sex='Male';   Grade='D'  },
+  @{ Id='zm_yunyang';    Lang='Mandarin'; Sex='Male';   Grade='D'  },
+  @{ Id='ef_dora';       Lang='Spanish';  Sex='Female'; Grade='-'  },
+  @{ Id='em_alex';       Lang='Spanish';  Sex='Male';   Grade='-'  },
+  @{ Id='em_santa';      Lang='Spanish';  Sex='Male';   Grade='-'  },
+  @{ Id='pf_dora';       Lang='Portuguese'; Sex='Female'; Grade='-' },
+  @{ Id='pm_alex';       Lang='Portuguese'; Sex='Male';   Grade='-' },
+  @{ Id='pm_santa';      Lang='Portuguese'; Sex='Male';   Grade='-' }
+)
+
+# Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
+# selection now happens after the model has been pre-loaded.
+function Invoke-VoicePreview ($target, $state, $voice) {
+  $wav = Join-Path $state 'preview.wav'
+  Remove-Item $wav -Force -ErrorAction SilentlyContinue
+  $prev = $OutputEncoding
+  $OutputEncoding = New-Object Text.UTF8Encoding $false
+  'This is how I will read your summaries back to you.' | python (Join-Path $target 'kokoro-tts.py') $wav $voice 1.15 2>$null
+  $OutputEncoding = $prev
+  if ((Test-Path $wav) -and ((Get-Item $wav).Length -gt 500)) {
+    try { $p = New-Object System.Media.SoundPlayer $wav; $p.PlaySync(); $p.Dispose() } catch { }
+    Remove-Item $wav -Force -ErrorAction SilentlyContinue
+    return $true
+  }
+  return $false
+}
+
+# Single-select list with a scrolling viewport and audio preview.
+function Select-Voice ($voices, $target, $state, $default) {
+  if ([Console]::IsInputRedirected) {
+    $typed = Read-Host "Kokoro voice (Enter for British female `"$default`")"
+    if ([string]::IsNullOrWhiteSpace($typed)) { return $default }
+    return $typed.Trim()
+  }
+
+  $pos = [Math]::Max(0, [array]::IndexOf(($voices | ForEach-Object { $_.Id }), $default))
+  $view = [Math]::Min(12, $voices.Count)
+  $rows = $view + 2                      # list lines, a scroll hint, and a status line
+  $start = 0
+  $width = [Math]::Max(40, [Console]::WindowWidth - 1)
+  $status = 'Press P to hear the highlighted voice.'
+  $pending = $false
+  $firstDraw = $true
+  $hadCursor = $true
+  try { $hadCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
+
+  try {
+    while ($true) {
+      if ($pos -lt $start) { $start = $pos }
+      if ($pos -ge $start + $view) { $start = $pos - $view + 1 }
+
+      if ($firstDraw) { $firstDraw = $false }
+      else { [Console]::SetCursorPosition(0, [Math]::Max(0, [Console]::CursorTop - $rows)) }
+
+      for ($i = $start; $i -lt $start + $view; $i++) {
+        $v = $voices[$i]
+        $cur = if ($i -eq $pos) { '>' } else { ' ' }
+        $line = "{0} {1,-14} {2,-11} {3,-7} grade {4}" -f $cur, $v.Id, $v.Lang, $v.Sex, $v.Grade
+        if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
+        $colour = if ($i -eq $pos) { 'Cyan' } else { 'Gray' }
+        Write-Host ($line.PadRight($width)) -ForegroundColor $colour
+      }
+      $hint = "  showing {0}-{1} of {2}   Up/Down to move, P to preview, Enter to choose" -f ($start + 1), ($start + $view), $voices.Count
+      if ($hint.Length -gt $width) { $hint = $hint.Substring(0, $width) }
+      Write-Host ($hint.PadRight($width)) -ForegroundColor DarkGray
+      if ($status.Length -gt $width) { $status = $status.Substring(0, $width) }
+      Write-Host ("  " + $status).PadRight($width) -ForegroundColor DarkGray
+
+      if ($pending) {
+        $pending = $false
+        $ok = Invoke-VoicePreview $target $state $voices[$pos].Id
+        $status = if ($ok) { "Played $($voices[$pos].Id). Press P again, or Enter to choose it." }
+                  else { "Could not synthesise $($voices[$pos].Id). Try another." }
+        continue
+      }
+
+      $key = [Console]::ReadKey($true)
+      switch ($key.Key) {
+        'UpArrow'   { $pos = ($pos - 1 + $voices.Count) % $voices.Count }
+        'DownArrow' { $pos = ($pos + 1) % $voices.Count }
+        'PageUp'    { $pos = [Math]::Max(0, $pos - $view) }
+        'PageDown'  { $pos = [Math]::Min($voices.Count - 1, $pos + $view) }
+        'Home'      { $pos = 0 }
+        'End'       { $pos = $voices.Count - 1 }
+        'Enter'     { Write-Host ''; return $voices[$pos].Id }
+        default {
+          if ($key.KeyChar -eq 'p' -or $key.KeyChar -eq 'P') {
+            $status = "Synthesising $($voices[$pos].Id) ..."
+            $pending = $true
+          }
+        }
+      }
+    }
+  } finally {
+    try { [Console]::CursorVisible = $hadCursor } catch { }
+  }
+}
+
 # --- choose engine ---
 Write-Host ''
 Write-Host 'Choose a voice engine:'
@@ -170,14 +318,12 @@ switch ($choice) {
   }
   '3' {
     if (-not (Test-Python)) { Deny-PythonEngine 'Kokoro'; $cfg += 'engine=native'; break }
-    $kv = Read-Host 'Kokoro voice (Enter for British female "bf_emma")'
-    if ([string]::IsNullOrWhiteSpace($kv)) { $kv = 'bf_emma' }
-    $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
     Write-Host 'Kokoro offline selected. Nothing will leave this machine.' -ForegroundColor Green
-
     Write-Host 'Kokoro keeps a warm background process so replies start speaking in ~1.7s.' -ForegroundColor Gray
     Write-Host 'It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes.' -ForegroundColor Gray
 
+    # Dependencies and the model come first, so that voice previews are quick when
+    # you get to the list rather than costing ten seconds each.
     # espeak-ng is not required: the espeakng-loader dependency bundles it.
     $have = $false
     try { python -c 'import kokoro, soundfile' *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
@@ -190,14 +336,22 @@ switch ($choice) {
     # front-end fetches on first use, so the first spoken reply is not silent.
     Write-Host 'Downloading Kokoro voice weights (~300MB) and language model (one time) ...'
     $probe = Join-Path $state 'warmup.wav'
-    'agent voice is ready' | python (Join-Path $target 'kokoro-tts.py') $probe $kv 1.15
-    if ((Test-Path $probe) -and ((Get-Item $probe).Length -gt 500)) {
+    'agent voice is ready' | python (Join-Path $target 'kokoro-tts.py') $probe 'bf_emma' 1.15
+    $kokoroWorks = (Test-Path $probe) -and ((Get-Item $probe).Length -gt 500)
+    Remove-Item $probe -Force -ErrorAction SilentlyContinue
+
+    if ($kokoroWorks) {
       Write-Host 'Kokoro is working.' -ForegroundColor Green
-      Remove-Item $probe -Force -ErrorAction SilentlyContinue
+      Write-Host ''
+      $kv = Select-Voice $KOKORO_VOICES $target $state 'bf_emma'
     } else {
       Write-Host 'Kokoro could not synthesise yet. Voice will use the basic Windows one until this is fixed;' -ForegroundColor Yellow
       Write-Host 'run the pip install above by hand to see the error.' -ForegroundColor Yellow
+      $kv = 'bf_emma'
     }
+
+    $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
+    Write-Host ("Voice: " + $kv) -ForegroundColor Green
   }
   '4' {
     $cfg += 'engine=native'

@@ -204,10 +204,13 @@ Edit `~/.agent-voice/config`:
   `en-US-AvaNeural`. List voices with `python -m edge_tts --list-voices`.
 - ElevenLabs: set `eleven_voice` to a voice id. Free accounts can use only the
   built-in premade voices via the API; paid accounts unlock the premium library.
-- Kokoro: set `kokoro_voice`, for example `bf_emma` (British female, the default),
-  `bm_george` (British male) or `af_heart` (American female), and `kokoro_speed`
-  (1.0 is normal, default 1.15). The first letter picks the language, so `b` is
-  British English and `a` is American. Full list:
+- Kokoro: easiest is to re-run the installer, which lists all 54 voices with their
+  published quality grades and lets you **hear each one before choosing** (Up/Down
+  to move, `P` to play a sample, Enter to pick). Or set `kokoro_voice` by hand, for
+  example `bf_emma` (British female, the default and the best-graded British voice
+  at B-), `bm_george` (British male, C) or `af_heart` (American female, A), plus
+  `kokoro_speed` (1.0 is normal, default 1.15). Grades vary a lot, so it is worth
+  listening rather than guessing. Full list:
   [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md).
 - Native (macOS): set `native_voice` to an installed voice name.
 
