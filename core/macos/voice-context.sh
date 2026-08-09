@@ -9,6 +9,8 @@ STATE="$ROOT/state"
 mkdir -p "$STATE"
 
 ENGINES="edge kokoro elevenlabs native"
+# The numbered edge-tts shortlist, kept next to its display so they cannot diverge.
+EDGE_SHORTLIST="en-GB-SoniaNeural en-GB-RyanNeural en-US-AvaNeural en-US-AndrewNeural en-AU-NatashaNeural en-IE-EmilyNeural"
 
 # Installed default engine, used when a session has no override of its own.
 cfg_get() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ROOT/config" 2>/dev/null | tail -1; }
@@ -78,10 +80,10 @@ if [ -n "$sid" ]; then
         echo "  voice text              summary only, no audio"
         echo "  voice off               back to normal replies"
         echo "  voice status            what this session will use right now"
-        echo "  voice engine <name>     edge | kokoro | elevenlabs | native"
-        echo "  voice model <id>        change the voice itself, e.g. voice model af_heart"
-        echo "  voice speed <n>         0.5 to 2.0, where 1.0 is normal"
-        echo "  voice list              voices available for the current engine"
+        echo "  voice engine            list engines, then: voice engine 2"
+        echo "  voice model             list voices, then: voice model 9"
+        echo "  voice speed             list speeds, then: voice speed 1.5"
+        echo "  voice list              same as voice model, lists what is available"
         echo "  voice help              this list"
         echo ""
         echo "  Add 'default' to reset one, for example: voice speed default"
@@ -89,53 +91,84 @@ if [ -n "$sid" ]; then
       } >&2
       exit 2 ;;
 
-    "voice list"|"voice list "*)
-      arg="${cmd#voice list}"
+    "voice list"|"voice list "*|"voice model"|"voice model "*|"voice voice"|"voice voice "*)
+      # Bare lists what is available, a number or an id selects, 'default' clears.
+      # Numbers index the full catalogue, ordered English first, so they stay stable
+      # whether or not the other languages are on screen.
+      arg="${cmd#voice }"; arg="${arg#list}"; arg="${arg#model}"; arg="${arg#voice}"
       arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      case "$cur_engine" in
-        kokoro)
-          if [ -f "$ROOT/lib/kokoro-voices.json" ]; then
-            filter="British American"
-            [ "$arg" = "all" ] && filter=""
-            node -e '
-              const v = require(process.argv[1]);
-              const f = process.argv[2] ? process.argv[2].split(" ") : null;
-              const rows = f ? v.filter(x => f.includes(x.lang)) : v;
-              console.error(`agent-voice: Kokoro voices (${rows.length} shown). Grades are the model own.`);
-              for (const r of rows) console.error(`  ${r.id.padEnd(14)} ${r.lang.padEnd(11)} ${r.sex.padEnd(7)} grade ${r.grade}`);
-            ' "$ROOT/lib/kokoro-voices.json" "$filter"
-            [ -n "$filter" ] && echo "  'voice list all' also shows the other 7 languages." >&2
-            echo "  Switch with: voice model <id>" >&2
-          fi ;;
-        edge)
-          {
-            echo "agent-voice: common edge-tts voices:"
-            echo "  en-GB-SoniaNeural   British female"
-            echo "  en-GB-RyanNeural    British male"
-            echo "  en-US-AvaNeural     American female"
-            echo "  en-US-AndrewNeural  American male"
-            echo "  Full list: python3 -m edge_tts --list-voices"
-            echo "  Switch with: voice model <id>"
-          } >&2 ;;
-        elevenlabs)
-          {
-            echo "agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library."
-            echo "  Switch with: voice model <voice-id>"
-          } >&2 ;;
-        *)
-          {
-            echo "agent-voice: the native engine uses the voice built into the OS."
-            echo "  macOS: System Settings > Accessibility > Spoken Content > System Voice."
-          } >&2 ;;
-      esac
-      exit 2 ;;
 
-    "voice model"|"voice model "*|"voice voice"|"voice voice "*)
-      # Change the voice itself for this session. Stored per engine, so switching
-      # engine does not carry a Kokoro id over to edge-tts where it means nothing.
-      arg="${cmd#voice }"; arg="${arg#model}"; arg="${arg#voice}"
-      arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      if [ -z "$arg" ] || [ "$arg" = "default" ]; then
+      show_voices() {
+        want_all="$1"
+        case "$cur_engine" in
+          kokoro)
+            [ -f "$ROOT/lib/kokoro-voices.json" ] || return
+            cur="$(voice_name kokoro)"; [ -f "$vce_flag" ] && cur="$(cat "$vce_flag")"
+            node -e '
+              const all = require(process.argv[1]);
+              const showAll = process.argv[2] === "1";
+              const cur = process.argv[3];
+              const shown = showAll ? all : all.filter(v => v.lang === "British" || v.lang === "American");
+              console.error(`agent-voice: Kokoro voices (${shown.length} of ${all.length}). Grades are the model own.`);
+              all.forEach((v, i) => {
+                if (!shown.includes(v)) return;
+                const mark = v.id === cur ? "*" : " ";
+                console.error(`  ${mark} ${String(i + 1).padStart(2)}. ${v.id.padEnd(14)} ${v.lang.padEnd(11)} ${v.sex.padEnd(7)} grade ${v.grade}`);
+              });
+            ' "$ROOT/lib/kokoro-voices.json" "$want_all" "$cur"
+            [ "$want_all" = "1" ] || echo "  'voice model all' adds the other 7 languages." >&2
+            echo "  * is in use now. Choose with: voice model 9   (or: voice model af_heart)" >&2 ;;
+          edge)
+            cur="$(voice_name edge)"; [ -f "$vce_flag" ] && cur="$(cat "$vce_flag")"
+            echo "agent-voice: common edge-tts voices:" >&2
+            i=1
+            for e in $EDGE_SHORTLIST; do
+              if [ "$e" = "$cur" ]; then mark="*"; else mark=" "; fi
+              case "$e" in
+                en-GB-Sonia*)   d="British female" ;;
+                en-GB-Ryan*)    d="British male" ;;
+                en-US-Ava*)     d="American female" ;;
+                en-US-Andrew*)  d="American male" ;;
+                en-AU-Natasha*) d="Australian female" ;;
+                en-IE-Emily*)   d="Irish female" ;;
+                *)              d="" ;;
+              esac
+              printf '  %s %2d. %-20s %s\n' "$mark" "$i" "$e" "$d" >&2
+              i=$((i + 1))
+            done
+            echo "  Hundreds more: python3 -m edge_tts --list-voices" >&2
+            echo "  Choose with: voice model 3   (or: voice model en-GB-SoniaNeural)" >&2 ;;
+          elevenlabs)
+            echo "agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library." >&2
+            echo "  There is no list to number here, so paste the id: voice model <voice-id>" >&2 ;;
+          *)
+            echo "agent-voice: the native engine uses the voice built into the OS." >&2
+            echo "  macOS: System Settings > Accessibility > Spoken Content > System Voice." >&2 ;;
+        esac
+      }
+
+      if [ -z "$arg" ] || [ "$arg" = "all" ]; then
+        if [ "$arg" = "all" ]; then show_voices 1; else show_voices 0; fi
+        exit 2
+      fi
+
+      # A bare number selects from the list just shown.
+      case "$arg" in
+        [0-9]*)
+          case "$cur_engine" in
+            kokoro)
+              picked="$(node -e 'const a=require(process.argv[1]); const i=parseInt(process.argv[2],10); process.stdout.write(a[i-1] ? a[i-1].id : "")' "$ROOT/lib/kokoro-voices.json" "$arg")"
+              [ -n "$picked" ] && arg="$picked" ;;
+            edge)
+              i=1
+              for e in $EDGE_SHORTLIST; do
+                [ "$i" = "$arg" ] && arg="$e" && break
+                i=$((i + 1))
+              done ;;
+          esac ;;
+      esac
+
+      if [ "$arg" = "default" ]; then
         rm -f "$vce_flag"
         echo "agent-voice: voice override cleared; $cur_engine is back to $(voice_name "$cur_engine")" >&2
       else
@@ -148,7 +181,7 @@ if [ -n "$sid" ]; then
           printf '%s' "$arg" > "$vce_flag"
           echo "agent-voice: voice for this session is now $arg (engine $cur_engine)" >&2
         else
-          echo "agent-voice: '$arg' is not a Kokoro voice. Try 'voice list' to see them." >&2
+          echo "agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list." >&2
         fi
       fi
       exit 2 ;;
@@ -159,7 +192,21 @@ if [ -n "$sid" ]; then
       # to get through quickly.
       arg="${cmd#voice speed}"
       arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      if [ -z "$arg" ] || [ "$arg" = "default" ]; then
+
+      # Listed as values rather than numbered, because 1 and 2 are themselves valid
+      # speeds and a numbered menu would be ambiguous.
+      if [ -z "$arg" ]; then
+        cur="$(default_speed "$cur_engine")"; [ -f "$spd_flag" ] && cur="$(cat "$spd_flag")"
+        echo "agent-voice: speed is ${cur}x now. Any number from 0.5 to 2.0 works, for example:" >&2
+        for p in "0.75|slower" "1.0|normal" "1.25|brisk" "1.5|fast" "1.75|very fast" "2.0|maximum"; do
+          v="${p%%|*}"; d="${p##*|}"
+          if awk -v a="$v" -v b="$cur" 'BEGIN{exit !(a==b)}'; then mark="*"; else mark=" "; fi
+          printf '  %s %-5s %s\n' "$mark" "$v" "$d" >&2
+        done
+        echo "  Choose with: voice speed 1.5" >&2
+        exit 2
+      fi
+      if [ "$arg" = "default" ]; then
         rm -f "$spd_flag"
         eng="$cfg_engine"; [ -f "$eng_flag" ] && eng="$(cat "$eng_flag")"
         echo "agent-voice: speed override cleared; back to $(default_speed "$eng")x" >&2
@@ -174,7 +221,35 @@ if [ -n "$sid" ]; then
     "voice engine"|"voice engine "*)
       arg="${cmd#voice engine}"
       arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      if [ -z "$arg" ] || [ "$arg" = "default" ]; then
+
+      # A bare number selects from the list below; the order is fixed so it is stable.
+      case "$arg" in
+        [0-9]*)
+          i=1
+          for e in $ENGINES; do
+            [ "$i" = "$arg" ] && arg="$e" && break
+            i=$((i + 1))
+          done ;;
+      esac
+
+      if [ -z "$arg" ]; then
+        echo "agent-voice: choose an engine by number or name:" >&2
+        i=1
+        for e in $ENGINES; do
+          if [ "$e" = "$cur_engine" ]; then mark="*"; else mark=" "; fi
+          case "$e" in
+            edge)       d="free, natural, summary text sent to Microsoft" ;;
+            kokoro)     d="free, natural, fully local, 54 voices" ;;
+            elevenlabs) d="best quality, needs your API key" ;;
+            *)          d="robotic, no dependencies, no network" ;;
+          esac
+          printf '  %s %d. %-11s %s\n' "$mark" "$i" "$e" "$d" >&2
+          i=$((i + 1))
+        done
+        echo "  * is in use now. Choose with: voice engine 2   (or: voice engine kokoro)" >&2
+        exit 2
+      fi
+      if [ "$arg" = "default" ]; then
         rm -f "$eng_flag"
         echo "agent-voice: engine override cleared; this session uses the default ($cfg_engine)." >&2
       elif printf '%s' " $ENGINES " | grep -q " $arg "; then

@@ -90,11 +90,34 @@ $spdFlag  = if ($sid) { Join-Path $state "speed.$sid" }
 # --- 1. in-session commands ---
 $cmd = ($prompt.Trim().ToLower()) -replace '^[\\/]', ''
 
-# voice engine <name> | voice engine default: pick a different engine for this
-# session only, so two windows can use different voices at the same time.
+# voice engine: bare shows a numbered list to choose from, since picking a number
+# beats remembering and typing a name. A name still works, and so does 'default'.
 if ($sid -and $cmd -match '^voice engine\b(.*)$') {
   $arg = $matches[1].Trim()
-  if (-not $arg -or $arg -eq 'default') {
+  $cur = if (Test-Path $engFlag) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
+
+  # A bare number selects from the list below; the order is fixed so it is stable.
+  if ($arg -match '^\d+$') {
+    $i = [int]$arg
+    if ($i -ge 1 -and $i -le $ENGINES.Count) { $arg = $ENGINES[$i - 1] }
+  }
+
+  if (-not $arg) {
+    [Console]::Error.WriteLine('agent-voice: choose an engine by number or name:')
+    for ($i = 0; $i -lt $ENGINES.Count; $i++) {
+      $mark = if ($ENGINES[$i] -eq $cur) { '*' } else { ' ' }
+      $desc = switch ($ENGINES[$i]) {
+        'edge'       { 'free, natural, summary text sent to Microsoft' }
+        'kokoro'     { 'free, natural, fully local, 54 voices' }
+        'elevenlabs' { 'best quality, needs your API key' }
+        default      { 'robotic, no dependencies, no network' }
+      }
+      [Console]::Error.WriteLine(("  {0} {1}. {2,-11} {3}" -f $mark, ($i + 1), $ENGINES[$i], $desc))
+    }
+    [Console]::Error.WriteLine("  * is in use now. Choose with: voice engine 2   (or: voice engine kokoro)")
+    exit 2
+  }
+  if ($arg -eq 'default') {
     Remove-Item $engFlag -Force -ErrorAction SilentlyContinue
     [Console]::Error.WriteLine("agent-voice: engine override cleared; this session uses the default ($cfgEngine).")
   }
@@ -130,10 +153,10 @@ if ($sid -and $cmd -eq 'voice help') {
     '  voice text              summary only, no audio',
     '  voice off               back to normal replies',
     '  voice status            what this session will use right now',
-    '  voice engine <name>     edge | kokoro | elevenlabs | native',
-    '  voice model <id>        change the voice itself, e.g. voice model af_heart',
-    '  voice speed <n>         0.5 to 2.0, where 1.0 is normal',
-    '  voice list              voices available for the current engine',
+    '  voice engine            list engines, then: voice engine 2',
+    '  voice model             list voices, then: voice model 9',
+    '  voice speed             list speeds, then: voice speed 1.5',
+    '  voice list              same as voice model, lists what is available',
     '  voice help              this list',
     '',
     "  Add 'default' to reset one, for example: voice speed default",
@@ -142,45 +165,81 @@ if ($sid -and $cmd -eq 'voice help') {
   exit 2
 }
 
-# voice list: what you can switch to on the engine in effect.
-if ($sid -and $cmd -match '^voice list\b(.*)$') {
-  $showAll = $matches[1].Trim() -eq 'all'
-  if ($curEngine -eq 'kokoro') {
-    $voices = Get-KokoroVoices
-    if (-not $showAll) { $voices = @($voices | Where-Object { $_.lang -in @('British', 'American') }) }
-    [Console]::Error.WriteLine("agent-voice: Kokoro voices ($($voices.Count) shown). Grades are the model's own.")
-    foreach ($v in $voices) {
-      [Console]::Error.WriteLine(("  {0,-14} {1,-11} {2,-7} grade {3}" -f $v.id, $v.lang, $v.sex, $v.grade))
+# The voices you can pick on the engine in effect, printed with numbers so that
+# choosing one is 'voice model 9' rather than recalling an exact id. Numbers index
+# the full catalogue, which is ordered English first, so they stay stable whether
+# or not the other languages are on screen.
+function Show-Voices ($engine, $showAll) {
+  if ($engine -eq 'kokoro') {
+    $all = Get-KokoroVoices
+    $shown = if ($showAll) { $all } else { @($all | Where-Object { $_.lang -in @('British', 'American') }) }
+    $cur = if ($sid -and (Test-Path $vceFlag)) { (Get-Content $vceFlag -Raw).Trim() } else { Get-VoiceName $engine }
+    [Console]::Error.WriteLine("agent-voice: Kokoro voices ($($shown.Count) of $($all.Count)). Grades are the model's own.")
+    for ($i = 0; $i -lt $all.Count; $i++) {
+      if ($shown -notcontains $all[$i]) { continue }
+      $mark = if ($all[$i].id -eq $cur) { '*' } else { ' ' }
+      [Console]::Error.WriteLine(("  {0} {1,2}. {2,-14} {3,-11} {4,-7} grade {5}" -f $mark, ($i + 1), $all[$i].id, $all[$i].lang, $all[$i].sex, $all[$i].grade))
     }
-    if (-not $showAll) { [Console]::Error.WriteLine("  'voice list all' also shows the other 7 languages.") }
-    [Console]::Error.WriteLine('  Switch with: voice model <id>')
+    if (-not $showAll) { [Console]::Error.WriteLine("  'voice model all' adds the other 7 languages.") }
+    [Console]::Error.WriteLine('  * is in use now. Choose with: voice model 9   (or: voice model af_heart)')
   }
-  elseif ($curEngine -eq 'edge') {
+  elseif ($engine -eq 'edge') {
+    $list = @('en-GB-SoniaNeural|British female', 'en-GB-RyanNeural|British male',
+              'en-US-AvaNeural|American female', 'en-US-AndrewNeural|American male',
+              'en-AU-NatashaNeural|Australian female', 'en-IE-EmilyNeural|Irish female')
+    $cur = if ($sid -and (Test-Path $vceFlag)) { (Get-Content $vceFlag -Raw).Trim() } else { Get-VoiceName $engine }
     [Console]::Error.WriteLine('agent-voice: common edge-tts voices:')
-    foreach ($v in @('en-GB-SoniaNeural   British female', 'en-GB-RyanNeural    British male',
-                     'en-US-AvaNeural     American female', 'en-US-AndrewNeural  American male')) {
-      [Console]::Error.WriteLine("  $v")
+    for ($i = 0; $i -lt $list.Count; $i++) {
+      $p = $list[$i].Split('|')
+      $mark = if ($p[0] -eq $cur) { '*' } else { ' ' }
+      [Console]::Error.WriteLine(("  {0} {1,2}. {2,-20} {3}" -f $mark, ($i + 1), $p[0], $p[1]))
     }
-    [Console]::Error.WriteLine('  Full list: python -m edge_tts --list-voices')
-    [Console]::Error.WriteLine('  Switch with: voice model <id>')
+    [Console]::Error.WriteLine('  Hundreds more: python -m edge_tts --list-voices')
+    [Console]::Error.WriteLine('  Choose with: voice model 3   (or: voice model en-GB-SoniaNeural)')
   }
-  elseif ($curEngine -eq 'elevenlabs') {
+  elseif ($engine -eq 'elevenlabs') {
     [Console]::Error.WriteLine('agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library.')
-    [Console]::Error.WriteLine('  Switch with: voice model <voice-id>')
+    [Console]::Error.WriteLine('  There is no list to number here, so paste the id: voice model <voice-id>')
   }
   else {
     [Console]::Error.WriteLine('agent-voice: the native engine uses the voice built into the OS.')
     [Console]::Error.WriteLine('  Windows: change it in Settings > Time & language > Speech.')
   }
+}
+
+# The numbered edge-tts shortlist, kept next to the display so they cannot diverge.
+$EDGE_SHORTLIST = @('en-GB-SoniaNeural', 'en-GB-RyanNeural', 'en-US-AvaNeural',
+                    'en-US-AndrewNeural', 'en-AU-NatashaNeural', 'en-IE-EmilyNeural')
+
+# voice list is kept as an alias for the bare listing.
+if ($sid -and $cmd -match '^voice list\b(.*)$') {
+  Show-Voices $curEngine ($matches[1].Trim() -eq 'all')
   exit 2
 }
 
-# voice model <id> (voice voice <id> reads naturally too): change the voice itself
-# for this session. Stored per engine, so switching engine does not carry a Kokoro
-# id over to edge-tts, where it would mean nothing.
+# voice model: bare lists, a number or an id selects, 'default' clears. Stored per
+# engine, so switching engine does not carry a Kokoro id over to edge-tts.
 if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
   $arg = $matches[1].Trim()
-  if (-not $arg -or $arg -eq 'default') {
+
+  if (-not $arg -or $arg -eq 'all') {
+    Show-Voices $curEngine ($arg -eq 'all')
+    exit 2
+  }
+
+  # A bare number selects from the list just shown.
+  if ($arg -match '^\d+$') {
+    $i = [int]$arg
+    if ($curEngine -eq 'kokoro') {
+      $all = Get-KokoroVoices
+      if ($i -ge 1 -and $i -le $all.Count) { $arg = $all[$i - 1].id }
+    }
+    elseif ($curEngine -eq 'edge') {
+      if ($i -ge 1 -and $i -le $EDGE_SHORTLIST.Count) { $arg = $EDGE_SHORTLIST[$i - 1] }
+    }
+  }
+
+  if ($arg -eq 'default') {
     Remove-Item $vceFlag -Force -ErrorAction SilentlyContinue
     [Console]::Error.WriteLine("agent-voice: voice override cleared; $curEngine is back to $(Get-VoiceName $curEngine)")
   }
@@ -194,7 +253,7 @@ if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
       Set-Content -Path $vceFlag -Value $arg -NoNewline
       [Console]::Error.WriteLine("agent-voice: voice for this session is now $arg (engine $curEngine)")
     } else {
-      [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Try 'voice list' to see them.")
+      [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
     }
   }
   exit 2
@@ -205,7 +264,21 @@ if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
 # want to get through quickly.
 if ($sid -and $cmd -match '^voice speed\b(.*)$') {
   $arg = $matches[1].Trim()
-  if (-not $arg -or $arg -eq 'default') {
+
+  # Listed as values rather than numbered, because 1 and 2 are themselves valid
+  # speeds and a numbered menu would be ambiguous.
+  if (-not $arg) {
+    $cur = if (Test-Path $spdFlag) { (Get-Content $spdFlag -Raw).Trim() } else { Get-DefaultSpeed $curEngine }
+    [Console]::Error.WriteLine("agent-voice: speed is ${cur}x now. Any number from 0.5 to 2.0 works, for example:")
+    foreach ($p in @('0.75|slower', '1.0|normal', '1.25|brisk', '1.5|fast', '1.75|very fast', '2.0|maximum')) {
+      $q = $p.Split('|')
+      $mark = if ([double]$q[0] -eq [double]$cur) { '*' } else { ' ' }
+      [Console]::Error.WriteLine(("  {0} {1,-5} {2}" -f $mark, $q[0], $q[1]))
+    }
+    [Console]::Error.WriteLine('  Choose with: voice speed 1.5')
+    exit 2
+  }
+  if ($arg -eq 'default') {
     Remove-Item $spdFlag -Force -ErrorAction SilentlyContinue
     $eng = if (Test-Path $engFlag) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
     [Console]::Error.WriteLine("agent-voice: speed override cleared; back to $(Get-DefaultSpeed $eng)x")
