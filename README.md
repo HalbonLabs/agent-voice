@@ -36,10 +36,12 @@ You choose per session whether you want the audio, just the text, or nothing.
 **Platform status, so nothing is a surprise.** All three agents have been tested
 end to end **on Windows**. The macOS scripts are written and reviewed and share the
 same Node helpers and the same voice catalogue, but have **not yet been run on an
-actual Mac**. The one part known to be unproven even in principle is `voice pick`
-on macOS, which opens Terminal via `osascript`; the in-session `voice preview`
-needs no window and should be fine. If you are on a Mac you are the first, so
-please report anything that misbehaves rather than working around it.
+actual Mac**. Two macOS parts touch the OS and are therefore the least certain: the
+**Stop agent-voice** Quick Action the installer builds, and `voice pick`, which
+opens Terminal via `osascript`. Both have setup-free fallbacks that work regardless
+(`voice stop` and `voice preview`), so neither can leave you stuck. If you are on a
+Mac you are the first, so please report anything that misbehaves rather than
+working around it.
 
 Claude Code is the most exercised of the three, and was built against it first.
 
@@ -125,8 +127,9 @@ install it. When stdin is not a real terminal (piped input, CI) it falls back to
 the older comma-separated prompt.
 
 It then asks which voice engine to use, wires the hooks into each agent's config
-without touching anything else already there, and sets up the stop
-shortcut: a real hotkey on Windows, a Quick Action to bind on macOS. Reload any open agent session afterwards so it picks up the hooks.
+without touching anything else already there, and sets up the stop shortcut: a
+real hotkey on Windows, a Quick Action to bind on macOS. Reload any open agent
+session afterwards so it picks up the hooks.
 
 Re-running the installer later is safe: it strips its own previous hook entries
 before adding them again, so nothing is ever duplicated. Use it to add another
