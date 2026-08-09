@@ -246,8 +246,14 @@ Global controls:
 - **Global default on/off:** Windows `~/.agent-voice/voice.cmd`; macOS
   `~/.agent-voice/voice.sh`. Sessions with no per-session setting follow this.
 
-Tip: do not run voice in two sessions at once unless you want both talking. Use
-`voice off` in the ones you are not listening to.
+**Running more than one session at a time.** Audio is global, but the summary is
+not, so keep `voice on` in the one window you are actually listening to and put the
+others on `voice text`. You still get the plain-language TL;DR at the bottom of
+every reply everywhere, just without several voices talking over each other. Use
+`voice off` only where you want the long replies back with no summary at all.
+
+This matters because the installer turns voice on globally, so a second window
+starts out speaking too. One `voice text` in it is enough.
 
 ## Changing the voice
 
