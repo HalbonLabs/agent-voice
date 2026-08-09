@@ -34,6 +34,27 @@ $agents = Read-Host 'Agents (Enter for claude)'
 if ([string]::IsNullOrWhiteSpace($agents)) { $agents = 'claude' }
 $agents = ($agents -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ }) -join ','
 
+# Does the `python` the hooks will actually call work? Guards against the Windows
+# Store stub, which sits on PATH and looks like an interpreter but is not one.
+function Test-Python {
+  try {
+    $v = & python -c 'import sys; print(sys.version_info[0])' 2>$null
+    return ($LASTEXITCODE -eq 0 -and (($v | Out-String).Trim() -eq '3'))
+  } catch { return $false }
+}
+
+# Shared message for the two engines that need Python. Falling back to native is
+# stated out loud rather than done quietly, so nobody ends up wondering why the
+# voice sounds robotic.
+function Deny-PythonEngine ($engineName) {
+  Write-Host ''
+  Write-Host "Python 3 was not found on PATH, and $engineName needs it." -ForegroundColor Yellow
+  Write-Host '  Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH",' -ForegroundColor Yellow
+  Write-Host '  then run this installer again and pick that engine.' -ForegroundColor Yellow
+  Write-Host '  (If Python is installed but only as "py", add it to PATH so plain "python" works.)' -ForegroundColor Yellow
+  Write-Host 'Using Native offline for now, so you still get a working voice.' -ForegroundColor Green
+}
+
 # --- choose engine ---
 Write-Host ''
 Write-Host 'Choose a voice engine:'
@@ -56,6 +77,7 @@ switch ($choice) {
     Write-Host 'ElevenLabs selected. Key stored locally (not in any script).' -ForegroundColor Green
   }
   '3' {
+    if (-not (Test-Python)) { Deny-PythonEngine 'Kokoro'; $cfg += 'engine=native'; break }
     $kv = Read-Host 'Kokoro voice (Enter for British female "bf_emma")'
     if ([string]::IsNullOrWhiteSpace($kv)) { $kv = 'bf_emma' }
     $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
@@ -90,11 +112,18 @@ switch ($choice) {
     Write-Host 'Native offline selected.' -ForegroundColor Green
   }
   default {
+    if (-not (Test-Python)) { Deny-PythonEngine 'edge-tts'; $cfg += 'engine=native'; break }
     $cfg += 'engine=edge'; $cfg += 'edge_voice=en-US-AvaNeural'; $cfg += 'edge_rate=+15%'
     Write-Host 'edge-tts (Ava) selected.' -ForegroundColor Green
     $have = $false
     try { python -m edge_tts --version *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
     if (-not $have) { Write-Host 'Installing edge-tts (pip install --user edge-tts) ...'; python -m pip install --user edge-tts }
+    # Confirm it can actually speak, rather than assuming pip succeeded.
+    try { python -m edge_tts --version *> $null } catch {}
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host 'edge-tts still is not working, so replies will use the basic Windows voice.' -ForegroundColor Yellow
+      Write-Host 'Run "python -m pip install --user edge-tts" by hand to see the error.' -ForegroundColor Yellow
+    }
   }
 }
 Set-Content -Path (Join-Path $target 'config') -Value ($cfg -join "`r`n")

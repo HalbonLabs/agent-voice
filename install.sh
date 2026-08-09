@@ -35,6 +35,26 @@ printf "Agents (Enter for claude): "
 read -r agents
 [ -z "$agents" ] && agents="claude"
 
+# Does the python3 the hooks will actually call work?
+have_python() {
+  python3 -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1
+}
+
+# Shared message for the two engines that need Python. Falling back to native is
+# stated out loud rather than done quietly, so nobody ends up wondering why the
+# voice sounds robotic.
+deny_python_engine() {
+  echo ""
+  echo "Python 3 was not found on PATH, and $1 needs it."
+  if [ "$(uname)" = "Darwin" ]; then
+    echo "  Install it with:  brew install python3     (or from https://www.python.org/downloads/)"
+  else
+    echo "  Install it with:  sudo apt-get install python3 python3-pip"
+  fi
+  echo "  Then run this installer again and pick that engine."
+  echo "Using Native offline for now, so you still get a working voice."
+}
+
 # Choose engine.
 echo ""
 echo "Choose a voice engine:"
@@ -60,33 +80,38 @@ case "$choice" in
     echo "ElevenLabs selected. Key stored locally (not in any script)."
     ;;
   3)
-    printf 'Kokoro voice (Enter for British female "bf_emma"): '
-    read -r kv; [ -z "$kv" ] && kv="bf_emma"
-    echo "engine=kokoro" >> "$CFG"
-    echo "kokoro_voice=$kv" >> "$CFG"
-    echo "kokoro_speed=1.15" >> "$CFG"
-    echo "Kokoro offline selected. Nothing will leave this machine."
-
-    echo "Kokoro keeps a warm background process so replies start speaking in ~1.7s."
-    echo "It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes."
-
-    # espeak-ng is not required: the espeakng-loader dependency bundles it.
-    if ! python3 -c 'import kokoro, soundfile' >/dev/null 2>&1; then
-      echo "Installing Kokoro (pip3 install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes."
-      python3 -m pip install --user kokoro soundfile
-    fi
-
-    # Warm up: pre-download the weights and the spaCy model that Kokoro's text
-    # front-end fetches on first use, so the first spoken reply is not silent.
-    echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
-    probe="$STATE/warmup.wav"
-    printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "$kv" 1.15 || true
-    if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then
-      echo "Kokoro is working."
-      rm -f "$probe"
+    if ! have_python; then
+      deny_python_engine "Kokoro"
+      echo "engine=native" >> "$CFG"
     else
-      echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
-      echo "run the pip3 install above by hand to see the error."
+      printf 'Kokoro voice (Enter for British female "bf_emma"): '
+      read -r kv; [ -z "$kv" ] && kv="bf_emma"
+      echo "engine=kokoro" >> "$CFG"
+      echo "kokoro_voice=$kv" >> "$CFG"
+      echo "kokoro_speed=1.15" >> "$CFG"
+      echo "Kokoro offline selected. Nothing will leave this machine."
+
+      echo "Kokoro keeps a warm background process so replies start speaking in ~1.7s."
+      echo "It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes."
+
+      # espeak-ng is not required: the espeakng-loader dependency bundles it.
+      if ! python3 -c 'import kokoro, soundfile' >/dev/null 2>&1; then
+        echo "Installing Kokoro (pip3 install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes."
+        python3 -m pip install --user kokoro soundfile
+      fi
+
+      # Warm up: pre-download the weights and the spaCy model that Kokoro's text
+      # front-end fetches on first use, so the first spoken reply is not silent.
+      echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
+      probe="$STATE/warmup.wav"
+      printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "$kv" 1.15 || true
+      if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then
+        echo "Kokoro is working."
+        rm -f "$probe"
+      else
+        echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
+        echo "run the pip3 install above by hand to see the error."
+      fi
     fi
     ;;
   4)
@@ -94,13 +119,23 @@ case "$choice" in
     echo "Native offline selected (macOS 'say'). Add premium voices in System Settings > Accessibility > Spoken Content."
     ;;
   *)
-    echo "engine=edge" >> "$CFG"
-    echo "edge_voice=en-US-AvaNeural" >> "$CFG"
-    echo "edge_rate=+15%" >> "$CFG"
-    echo "edge-tts (Ava) selected."
-    if ! python3 -m edge_tts --version >/dev/null 2>&1; then
-      echo "Installing edge-tts (pip3 install --user edge-tts) ..."
-      python3 -m pip install --user edge-tts
+    if ! have_python; then
+      deny_python_engine "edge-tts"
+      echo "engine=native" >> "$CFG"
+    else
+      echo "engine=edge" >> "$CFG"
+      echo "edge_voice=en-US-AvaNeural" >> "$CFG"
+      echo "edge_rate=+15%" >> "$CFG"
+      echo "edge-tts (Ava) selected."
+      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
+        echo "Installing edge-tts (pip3 install --user edge-tts) ..."
+        python3 -m pip install --user edge-tts
+      fi
+      # Confirm it can actually speak, rather than assuming pip succeeded.
+      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
+        echo "edge-tts still is not working, so replies will use the basic 'say' voice."
+        echo "Run 'python3 -m pip install --user edge-tts' by hand to see the error."
+      fi
     fi
     ;;
 esac

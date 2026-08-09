@@ -78,20 +78,29 @@ and others silent.
 
 ## Install
 
-You need the agent(s) already installed (each ships with Node, which this uses).
-Then, from the repo folder:
+You need the agent(s) already installed, which is where Node comes from. Python 3
+is needed only if you want edge-tts or Kokoro; the installer checks for it and
+says so plainly if it is missing, rather than leaving you with a broken choice.
 
 **Windows** (PowerShell):
 
 ```
+git clone https://github.com/HalbonLabs/agent-voice.git
+cd agent-voice
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 **macOS / Linux** (Terminal):
 
 ```
+git clone https://github.com/HalbonLabs/agent-voice.git
+cd agent-voice
 bash install.sh
 ```
+
+Re-running the installer later is safe: it strips its own previous hook entries
+before adding them again, so nothing is ever duplicated. Use it to add another
+agent or change engine.
 
 The installer asks which agents to enable, which voice engine to use, wires the
 hooks into each agent's config without touching anything else already there, and
