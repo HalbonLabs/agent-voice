@@ -181,26 +181,43 @@ hook, act on that session only, and never reach the model:
 - `voice on`     summary plus spoken audio
 - `voice text`   summary only, no audio
 - `voice off`    back to normal long replies, no summary, no audio
-- `voice status` show this session's state, plus the engine, the exact voice and
-  the speed it will use, and where each of those came from
-- `voice engine <name>` use a different engine in this session only, where
-  `<name>` is `edge`, `kokoro`, `elevenlabs` or `native`. `voice engine default`
-  goes back to the installed choice.
+- `voice status` this session's state, plus the engine, the exact voice and the
+  speed it will use, and where each of those came from
+- `voice engine` list the engines and mark the one in use, then `voice engine 2`
+  (or `voice engine kokoro`)
+- `voice model` list the voices for the engine you are on, then `voice model 9`
+  (or `voice model af_heart`)
+- `voice preview <n>` hear a voice without switching to it, so you can audition a
+  few and commit with `voice model <n>`
+- `voice pick` open the installer's picker in its own window: arrows to move, `P`
+  to hear, Enter to choose
+- `voice speed` show the current speed and some useful values, then
+  `voice speed 1.5`. Any number from 0.5 to 2.0 works, 1.0 being normal
+- `voice list` the same listing as bare `voice model`; `voice model all` adds the
+  other 7 languages
+- `voice help` all of the above, in the session, so none of it has to be
+  remembered
 
-- `voice model <id>` change the voice itself for this session, for example
-  `voice model af_heart`. Stored per engine, so switching engine does not carry a
-  Kokoro id over to edge-tts where it would mean nothing.
-- `voice speed <n>` how fast the summary is read, in this session only, where 1.0
-  is normal and the range is 0.5 to 2.0. `voice speed default` resets it.
-- `voice list` the voices available on the current engine. For Kokoro that is the
-  English 28 with their grades, and `voice list all` adds the other 7 languages.
-- `voice help` all of the above, in the session, so none of this has to be
-  remembered.
+Add `default` to reset any one of them, as in `voice speed default`.
+
+**Picking without typing.** Each of the three settings lists what is available
+first, marks what is in use, and takes a number, so nothing has to be recalled
+exactly. Numbers for Kokoro index the full catalogue, which is ordered English
+first, so they stay the same whether or not the other languages are on screen.
+Speed is deliberately not numbered, because 1 and 2 are themselves valid speeds
+and a numbered menu would be ambiguous.
+
+`voice preview` and `voice pick` are Kokoro only, since it is the one engine that
+synthesises locally and instantly. `voice pick` opens a separate window because
+the hook cannot read keystrokes: it runs non-interactively with stdin carrying the
+JSON payload, so a window with its own keyboard is the only way to get arrow keys.
+It is the same picker the installer uses, from the same file.
 
 `voice engine` is how you compare voices without reinstalling: set one window to
 `edge` and another to `kokoro` and they will speak differently at the same time.
 Switching to `kokoro` also starts warming the model straight away, so the first
-reply on it is not slow.
+reply on it is not slow. The voice override is stored per engine, so switching
+engine never carries a Kokoro id over to edge-tts where it would mean nothing.
 
 `voice speed` exists because a spoken summary you have already half-read is
 usually something you want to get through quickly. It is one scale across every

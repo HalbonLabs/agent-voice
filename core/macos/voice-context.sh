@@ -82,6 +82,8 @@ if [ -n "$sid" ]; then
         echo "  voice status            what this session will use right now"
         echo "  voice engine            list engines, then: voice engine 2"
         echo "  voice model             list voices, then: voice model 9"
+        echo "  voice preview <n>       hear a voice without switching to it"
+        echo "  voice pick              browse voices with arrows and P, in a new window"
         echo "  voice speed             list speeds, then: voice speed 1.5"
         echo "  voice list              same as voice model, lists what is available"
         echo "  voice help              this list"
@@ -89,6 +91,48 @@ if [ -n "$sid" ]; then
         echo "  Add 'default' to reset one, for example: voice speed default"
         echo "  Stop speech immediately: run ~/.agent-voice/shush.sh"
       } >&2
+      exit 2 ;;
+
+    "voice pick")
+      # The same arrow-key picker the installer uses, in its own Terminal window,
+      # because this hook cannot read keystrokes itself.
+      if [ ! -f "$ROOT/pick-voice.sh" ]; then
+        echo "agent-voice: pick-voice.sh is missing; re-run the installer." >&2
+      elif [ "$cur_engine" != "kokoro" ]; then
+        echo "agent-voice: the picker only covers Kokoro, the one engine whose voices can be auditioned offline." >&2
+        echo "  You are on '$cur_engine'. Switch with 'voice engine kokoro', or use 'voice model' for a list." >&2
+      elif [ "$(uname)" = "Darwin" ]; then
+        osascript -e "tell application \"Terminal\" to do script \"bash '$ROOT/pick-voice.sh' --session '$sid' '$cur_engine'\"" >/dev/null 2>&1 \
+          && echo "agent-voice: opened the voice picker in a new Terminal window. Arrows to move, P to hear, Enter to choose." >&2 \
+          || echo "agent-voice: could not open a Terminal window. Run it yourself: bash ~/.agent-voice/pick-voice.sh --session $sid" >&2
+      else
+        echo "agent-voice: no window to open here. Run it yourself in another terminal:" >&2
+        echo "  bash ~/.agent-voice/pick-voice.sh --session $sid" >&2
+      fi
+      exit 2 ;;
+
+    "voice preview"|"voice preview "*)
+      # Hear a voice without switching to it. Backgrounded so the hook returns at
+      # once rather than holding up the prompt while audio plays.
+      arg="${cmd#voice preview}"
+      arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      if [ "$cur_engine" != "kokoro" ]; then
+        echo "agent-voice: preview only works on Kokoro, which synthesises locally. You are on '$cur_engine'." >&2
+        exit 2
+      fi
+      case "$arg" in
+        [0-9]*)
+          picked="$(node -e 'const a=require(process.argv[1]); const i=parseInt(process.argv[2],10); process.stdout.write(a[i-1] ? a[i-1].id : "")' "$ROOT/lib/kokoro-voices.json" "$arg" 2>/dev/null)"
+          [ -n "$picked" ] && arg="$picked" ;;
+      esac
+      if [ -z "$arg" ]; then
+        echo "agent-voice: say which one, for example 'voice preview 9'. Type 'voice model' for the list." >&2
+      elif ! node -e 'process.exit(require(process.argv[1]).some(v => v.id === process.argv[2]) ? 0 : 1)' "$ROOT/lib/kokoro-voices.json" "$arg" 2>/dev/null; then
+        echo "agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list." >&2
+      else
+        (ROOT="$ROOT" bash "$ROOT/pick-voice.sh" --preview "$arg" >/dev/null 2>&1 &)
+        echo "agent-voice: playing $arg. Switch to it with: voice model $arg" >&2
+      fi
       exit 2 ;;
 
     "voice list"|"voice list "*|"voice model"|"voice model "*|"voice voice"|"voice voice "*)

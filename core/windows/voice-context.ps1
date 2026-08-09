@@ -155,6 +155,8 @@ if ($sid -and $cmd -eq 'voice help') {
     '  voice status            what this session will use right now',
     '  voice engine            list engines, then: voice engine 2',
     '  voice model             list voices, then: voice model 9',
+    '  voice preview <n>       hear a voice without switching to it',
+    '  voice pick              browse voices with arrows and P, in a new window',
     '  voice speed             list speeds, then: voice speed 1.5',
     '  voice list              same as voice model, lists what is available',
     '  voice help              this list',
@@ -210,6 +212,57 @@ function Show-Voices ($engine, $showAll) {
 # The numbered edge-tts shortlist, kept next to the display so they cannot diverge.
 $EDGE_SHORTLIST = @('en-GB-SoniaNeural', 'en-GB-RyanNeural', 'en-US-AvaNeural',
                     'en-US-AndrewNeural', 'en-AU-NatashaNeural', 'en-IE-EmilyNeural')
+
+# voice pick: the same arrow-key picker the installer uses, in its own console
+# window, because this hook cannot read keystrokes itself. Enter writes the
+# session's voice and the window closes.
+if ($sid -and $cmd -eq 'voice pick') {
+  $picker = Join-Path $root 'pick-voice.ps1'
+  if (-not (Test-Path $picker)) {
+    [Console]::Error.WriteLine('agent-voice: pick-voice.ps1 is missing; re-run the installer.')
+  } elseif ($curEngine -ne 'kokoro') {
+    [Console]::Error.WriteLine("agent-voice: the picker only covers Kokoro, the one engine whose voices can be auditioned offline.")
+    [Console]::Error.WriteLine("  You are on '$curEngine'. Switch with 'voice engine kokoro', or use 'voice model' for a list.")
+  } else {
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $picker,
+      '-SessionId', $sid, '-Engine', $curEngine, '-Root', $root
+    ) | Out-Null
+    [Console]::Error.WriteLine('agent-voice: opened the voice picker in a new window. Arrows to move, P to hear, Enter to choose.')
+  }
+  exit 2
+}
+
+# voice preview <n|id>: hear a voice without switching to it. Backgrounded so the
+# hook returns at once rather than holding up the prompt while audio plays.
+if ($sid -and $cmd -match '^voice preview\b(.*)$') {
+  $arg = $matches[1].Trim()
+  if ($curEngine -ne 'kokoro') {
+    [Console]::Error.WriteLine("agent-voice: preview only works on Kokoro, which synthesises locally. You are on '$curEngine'.")
+    exit 2
+  }
+  $all = Get-KokoroVoices
+  if ($arg -match '^\d+$') {
+    $i = [int]$arg
+    if ($i -ge 1 -and $i -le $all.Count) { $arg = $all[$i - 1].id }
+  }
+  if (-not $arg) {
+    [Console]::Error.WriteLine("agent-voice: say which one, for example 'voice preview 9'. Type 'voice model' for the list.")
+  }
+  elseif (@($all | ForEach-Object { $_.id }) -notcontains $arg) {
+    [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
+  }
+  else {
+    $picker = Join-Path $root 'pick-voice.ps1'
+    if (Test-Path $picker) {
+      Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $picker, '-Preview', $arg, '-Root', $root
+      ) | Out-Null
+      [Console]::Error.WriteLine("agent-voice: playing $arg. Switch to it with: voice model $arg")
+    }
+  }
+  exit 2
+}
 
 # voice list is kept as an alias for the bare listing.
 if ($sid -and $cmd -match '^voice list\b(.*)$') {

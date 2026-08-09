@@ -157,95 +157,10 @@ while IFS= read -r line; do KOKORO_VOICES+=("$line"); done < <(
   node -e 'for (const v of require(process.argv[1])) console.log(`${v.id}|${v.lang}|${v.sex}|${v.grade}`)' \
     "$SRC/lib/kokoro-voices.json"
 )
-# Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
-# selection happens after the model has been pre-loaded.
-preview_voice() {
-  pv_wav="$STATE/preview.wav"
-  rm -f "$pv_wav"
-  printf 'This is how I will read your summaries back to you.' \
-    | python3 "$TARGET/kokoro-tts.py" "$pv_wav" "$1" 1.15 >/dev/null 2>&1
-  if [ -s "$pv_wav" ] && [ "$(wc -c < "$pv_wav")" -gt 500 ]; then
-    afplay "$pv_wav" >/dev/null 2>&1
-    rm -f "$pv_wav"
-    return 0
-  fi
-  return 1
-}
-
-# Single-select list with a scrolling viewport and audio preview. Sets $chosen_voice.
-select_voice() {
-  default_voice="$1"
-  total=${#KOKORO_VOICES[@]}
-
-  if [ ! -t 0 ]; then
-    printf 'Kokoro voice (Enter for British female "%s"): ' "$default_voice"
-    read -r typed
-    chosen_voice="${typed:-$default_voice}"
-    return
-  fi
-
-  vpos=0
-  i=0
-  for entry in "${KOKORO_VOICES[@]}"; do
-    [ "${entry%%|*}" = "$default_voice" ] && vpos=$i
-    i=$((i + 1))
-  done
-  view=12
-  [ "$total" -lt "$view" ] && view=$total
-  vrows=$((view + 2))
-  vstart=0
-  status="Press P to hear the highlighted voice."
-  pending=0
-  first=1
-
-  while :; do
-    [ "$vpos" -lt "$vstart" ] && vstart=$vpos
-    [ "$vpos" -ge $((vstart + view)) ] && vstart=$((vpos - view + 1))
-
-    [ "$first" = 1 ] || printf '\033[%dA' "$vrows"
-    first=0
-
-    i=$vstart
-    while [ "$i" -lt $((vstart + view)) ]; do
-      entry="${KOKORO_VOICES[$i]}"
-      vid="${entry%%|*}"; rest="${entry#*|}"
-      vlang="${rest%%|*}"; rest="${rest#*|}"
-      vsex="${rest%%|*}"; vgrade="${rest##*|}"
-      if [ "$i" = "$vpos" ]; then cur=">"; else cur=" "; fi
-      printf '\033[K%s %-14s %-11s %-7s grade %s\n' "$cur" "$vid" "$vlang" "$vsex" "$vgrade"
-      i=$((i + 1))
-    done
-    printf '\033[K  showing %d-%d of %d   Up/Down to move, P to preview, Enter to choose\n' \
-      "$((vstart + 1))" "$((vstart + view))" "$total"
-    printf '\033[K  %s\n' "$status"
-
-    if [ "$pending" = 1 ]; then
-      pending=0
-      cur_id="${KOKORO_VOICES[$vpos]%%|*}"
-      if preview_voice "$cur_id"; then
-        status="Played $cur_id. Press P again, or Enter to choose it."
-      else
-        status="Could not synthesise $cur_id. Try another."
-      fi
-      continue
-    fi
-
-    IFS= read -rsn1 ch
-    if [ "$ch" = "$(printf '\033')" ]; then
-      IFS= read -rsn2 -t 0.1 rest2
-      case "$rest2" in
-        '[A') vpos=$(((vpos - 1 + total) % total)) ;;
-        '[B') vpos=$(((vpos + 1) % total)) ;;
-      esac
-      continue
-    fi
-    case "$ch" in
-      p|P) status="Synthesising ${KOKORO_VOICES[$vpos]%%|*} ..."; pending=1 ;;
-      '')  echo ""; chosen_voice="${KOKORO_VOICES[$vpos]%%|*}"; return ;;
-    esac
-  done
-}
-
+# The voice picker (arrow keys, P to preview) lives in core/macos/pick-voice.sh so
+# that the installer and the in-session "voice pick" command share one
+# implementation rather than drifting apart.
+. "$SRC/core/macos/pick-voice.sh"
 # Choose engine.
 echo ""
 echo "Choose a voice engine:"
