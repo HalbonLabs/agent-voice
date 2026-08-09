@@ -11,6 +11,30 @@ $state = Join-Path $root 'state'
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 
 $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
+# How a command replies to the user.
+#
+# Writing to stderr and exiting 2 is documented to show the text to the user, and
+# it does in the terminal, but the VS Code extension does not render it, so the
+# commands looked like they did nothing. Structured JSON on stdout with exit 0 is
+# the first-class mechanism: "decision": "block" stops the prompt reaching the
+# model exactly as exit 2 did, "reason" is shown to the user, and "systemMessage"
+# is a second channel for clients that surface that instead.
+$script:outLines = New-Object System.Collections.Generic.List[string]
+function Add-Out ($line) { $script:outLines.Add([string]$line) }
+function Send-Out {
+  $text = ($script:outLines -join "`n")
+  $payload = [ordered]@{
+    decision       = 'block'
+    reason         = $text
+    systemMessage  = $text
+    suppressOutput = $true
+  }
+  [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 3))
+  # Also on stderr, for terminals that show that instead of parsing the JSON.
+  [Console]::Error.WriteLine($text)
+  exit 0
+}
+
 $SPEED_MIN = 0.5
 $SPEED_MAX = 2.0
 
@@ -103,7 +127,7 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
   }
 
   if (-not $arg) {
-    [Console]::Error.WriteLine('agent-voice: choose an engine by number or name:')
+    Add-Out ('agent-voice: choose an engine by number or name:')
     for ($i = 0; $i -lt $ENGINES.Count; $i++) {
       $mark = if ($ENGINES[$i] -eq $cur) { '*' } else { ' ' }
       $desc = switch ($ENGINES[$i]) {
@@ -112,14 +136,14 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
         'elevenlabs' { 'best quality, needs your API key' }
         default      { 'robotic, no dependencies, no network' }
       }
-      [Console]::Error.WriteLine(("  {0} {1}. {2,-11} {3}" -f $mark, ($i + 1), $ENGINES[$i], $desc))
+      Add-Out (("  {0} {1}. {2,-11} {3}" -f $mark, ($i + 1), $ENGINES[$i], $desc))
     }
-    [Console]::Error.WriteLine("  * is in use now. Choose with: voice engine 2   (or: voice engine kokoro)")
-    exit 2
+    Add-Out ("  * is in use now. Choose with: voice engine 2   (or: voice engine kokoro)")
+    Send-Out
   }
   if ($arg -eq 'default') {
     Remove-Item $engFlag -Force -ErrorAction SilentlyContinue
-    [Console]::Error.WriteLine("agent-voice: engine override cleared; this session uses the default ($cfgEngine).")
+    Add-Out ("agent-voice: engine override cleared; this session uses the default ($cfgEngine).")
   }
   elseif ($ENGINES -contains $arg) {
     Set-Content -Path $engFlag -Value $arg -NoNewline
@@ -133,12 +157,12 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
       if (Test-Path $serve) { Start-Process -FilePath $cfgPython -ArgumentList @($serve, $state) -WindowStyle Hidden }
       $note = ' (warming the model now)'
     }
-    [Console]::Error.WriteLine("agent-voice: engine for this session is now $arg$note")
+    Add-Out ("agent-voice: engine for this session is now $arg$note")
   }
   else {
-    [Console]::Error.WriteLine("agent-voice: unknown engine '$arg'. Choose from: $($ENGINES -join ', '), or 'default'.")
+    Add-Out ("agent-voice: unknown engine '$arg'. Choose from: $($ENGINES -join ', '), or 'default'.")
   }
-  exit 2
+  Send-Out
 }
 
 # The engine in effect for this session, which the voice commands below act on.
@@ -152,11 +176,11 @@ if ($sid -and ($cmd -eq 'voice stop' -or $cmd -eq 'shush' -or $cmd -eq 'stop voi
   $shush = Join-Path $root 'shush.ps1'
   if (Test-Path $shush) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shush *> $null
-    [Console]::Error.WriteLine('agent-voice: speech stopped.')
+    Add-Out ('agent-voice: speech stopped.')
   } else {
-    [Console]::Error.WriteLine('agent-voice: shush.ps1 is missing; re-run the installer.')
+    Add-Out ('agent-voice: shush.ps1 is missing; re-run the installer.')
   }
-  exit 2
+  Send-Out
 }
 
 # voice help: every command in one place.
@@ -178,8 +202,8 @@ if ($sid -and $cmd -eq 'voice help') {
     '',
     "  Add 'default' to reset one, for example: voice speed default",
     '  Stop speech immediately: Ctrl+Alt+S, or type: voice stop'
-  ) | ForEach-Object { [Console]::Error.WriteLine($_) }
-  exit 2
+  ) | ForEach-Object { Add-Out $_ }
+  Send-Out
 }
 
 # The voices you can pick on the engine in effect, printed with numbers so that
@@ -191,36 +215,36 @@ function Show-Voices ($engine, $showAll) {
     $all = Get-KokoroVoices
     $shown = if ($showAll) { $all } else { @($all | Where-Object { $_.lang -in @('British', 'American') }) }
     $cur = if ($sid -and (Test-Path $vceFlag)) { (Get-Content $vceFlag -Raw).Trim() } else { Get-VoiceName $engine }
-    [Console]::Error.WriteLine("agent-voice: Kokoro voices ($($shown.Count) of $($all.Count)). Grades are the model's own.")
+    Add-Out ("agent-voice: Kokoro voices ($($shown.Count) of $($all.Count)). Grades are the model's own.")
     for ($i = 0; $i -lt $all.Count; $i++) {
       if ($shown -notcontains $all[$i]) { continue }
       $mark = if ($all[$i].id -eq $cur) { '*' } else { ' ' }
-      [Console]::Error.WriteLine(("  {0} {1,2}. {2,-14} {3,-11} {4,-7} grade {5}" -f $mark, ($i + 1), $all[$i].id, $all[$i].lang, $all[$i].sex, $all[$i].grade))
+      Add-Out (("  {0} {1,2}. {2,-14} {3,-11} {4,-7} grade {5}" -f $mark, ($i + 1), $all[$i].id, $all[$i].lang, $all[$i].sex, $all[$i].grade))
     }
-    if (-not $showAll) { [Console]::Error.WriteLine("  'voice model all' adds the other 7 languages.") }
-    [Console]::Error.WriteLine('  * is in use now. Choose with: voice model 9   (or: voice model af_heart)')
+    if (-not $showAll) { Add-Out ("  'voice model all' adds the other 7 languages.") }
+    Add-Out ('  * is in use now. Choose with: voice model 9   (or: voice model af_heart)')
   }
   elseif ($engine -eq 'edge') {
     $list = @('en-GB-SoniaNeural|British female', 'en-GB-RyanNeural|British male',
               'en-US-AvaNeural|American female', 'en-US-AndrewNeural|American male',
               'en-AU-NatashaNeural|Australian female', 'en-IE-EmilyNeural|Irish female')
     $cur = if ($sid -and (Test-Path $vceFlag)) { (Get-Content $vceFlag -Raw).Trim() } else { Get-VoiceName $engine }
-    [Console]::Error.WriteLine('agent-voice: common edge-tts voices:')
+    Add-Out ('agent-voice: common edge-tts voices:')
     for ($i = 0; $i -lt $list.Count; $i++) {
       $p = $list[$i].Split('|')
       $mark = if ($p[0] -eq $cur) { '*' } else { ' ' }
-      [Console]::Error.WriteLine(("  {0} {1,2}. {2,-20} {3}" -f $mark, ($i + 1), $p[0], $p[1]))
+      Add-Out (("  {0} {1,2}. {2,-20} {3}" -f $mark, ($i + 1), $p[0], $p[1]))
     }
-    [Console]::Error.WriteLine('  Hundreds more: python -m edge_tts --list-voices')
-    [Console]::Error.WriteLine('  Choose with: voice model 3   (or: voice model en-GB-SoniaNeural)')
+    Add-Out ('  Hundreds more: python -m edge_tts --list-voices')
+    Add-Out ('  Choose with: voice model 3   (or: voice model en-GB-SoniaNeural)')
   }
   elseif ($engine -eq 'elevenlabs') {
-    [Console]::Error.WriteLine('agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library.')
-    [Console]::Error.WriteLine('  There is no list to number here, so paste the id: voice model <voice-id>')
+    Add-Out ('agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library.')
+    Add-Out ('  There is no list to number here, so paste the id: voice model <voice-id>')
   }
   else {
-    [Console]::Error.WriteLine('agent-voice: the native engine uses the voice built into the OS.')
-    [Console]::Error.WriteLine('  Windows: change it in Settings > Time & language > Speech.')
+    Add-Out ('agent-voice: the native engine uses the voice built into the OS.')
+    Add-Out ('  Windows: change it in Settings > Time & language > Speech.')
   }
 }
 
@@ -234,18 +258,18 @@ $EDGE_SHORTLIST = @('en-GB-SoniaNeural', 'en-GB-RyanNeural', 'en-US-AvaNeural',
 if ($sid -and $cmd -eq 'voice pick') {
   $picker = Join-Path $root 'pick-voice.ps1'
   if (-not (Test-Path $picker)) {
-    [Console]::Error.WriteLine('agent-voice: pick-voice.ps1 is missing; re-run the installer.')
+    Add-Out ('agent-voice: pick-voice.ps1 is missing; re-run the installer.')
   } elseif ($curEngine -ne 'kokoro') {
-    [Console]::Error.WriteLine("agent-voice: the picker only covers Kokoro, the one engine whose voices can be auditioned offline.")
-    [Console]::Error.WriteLine("  You are on '$curEngine'. Switch with 'voice engine kokoro', or use 'voice model' for a list.")
+    Add-Out ("agent-voice: the picker only covers Kokoro, the one engine whose voices can be auditioned offline.")
+    Add-Out ("  You are on '$curEngine'. Switch with 'voice engine kokoro', or use 'voice model' for a list.")
   } else {
     Start-Process -FilePath 'powershell.exe' -ArgumentList @(
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $picker,
       '-SessionId', $sid, '-Engine', $curEngine, '-Root', $root
     ) | Out-Null
-    [Console]::Error.WriteLine('agent-voice: opened the voice picker in a new window. Arrows to move, P to hear, Enter to choose.')
+    Add-Out ('agent-voice: opened the voice picker in a new window. Arrows to move, P to hear, Enter to choose.')
   }
-  exit 2
+  Send-Out
 }
 
 # voice preview <n|id>: hear a voice without switching to it. Backgrounded so the
@@ -253,8 +277,8 @@ if ($sid -and $cmd -eq 'voice pick') {
 if ($sid -and $cmd -match '^voice preview\b(.*)$') {
   $arg = $matches[1].Trim()
   if ($curEngine -ne 'kokoro') {
-    [Console]::Error.WriteLine("agent-voice: preview only works on Kokoro, which synthesises locally. You are on '$curEngine'.")
-    exit 2
+    Add-Out ("agent-voice: preview only works on Kokoro, which synthesises locally. You are on '$curEngine'.")
+    Send-Out
   }
   $all = Get-KokoroVoices
   if ($arg -match '^\d+$') {
@@ -262,10 +286,10 @@ if ($sid -and $cmd -match '^voice preview\b(.*)$') {
     if ($i -ge 1 -and $i -le $all.Count) { $arg = $all[$i - 1].id }
   }
   if (-not $arg) {
-    [Console]::Error.WriteLine("agent-voice: say which one, for example 'voice preview 9'. Type 'voice model' for the list.")
+    Add-Out ("agent-voice: say which one, for example 'voice preview 9'. Type 'voice model' for the list.")
   }
   elseif (@($all | ForEach-Object { $_.id }) -notcontains $arg) {
-    [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
+    Add-Out ("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
   }
   else {
     $picker = Join-Path $root 'pick-voice.ps1'
@@ -273,16 +297,16 @@ if ($sid -and $cmd -match '^voice preview\b(.*)$') {
       Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $picker, '-Preview', $arg, '-Root', $root
       ) | Out-Null
-      [Console]::Error.WriteLine("agent-voice: playing $arg. Switch to it with: voice model $arg")
+      Add-Out ("agent-voice: playing $arg. Switch to it with: voice model $arg")
     }
   }
-  exit 2
+  Send-Out
 }
 
 # voice list is kept as an alias for the bare listing.
 if ($sid -and $cmd -match '^voice list\b(.*)$') {
   Show-Voices $curEngine ($matches[1].Trim() -eq 'all')
-  exit 2
+  Send-Out
 }
 
 # voice model: bare lists, a number or an id selects, 'default' clears. Stored per
@@ -292,7 +316,7 @@ if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
 
   if (-not $arg -or $arg -eq 'all') {
     Show-Voices $curEngine ($arg -eq 'all')
-    exit 2
+    Send-Out
   }
 
   # A bare number selects from the list just shown.
@@ -309,7 +333,7 @@ if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
 
   if ($arg -eq 'default') {
     Remove-Item $vceFlag -Force -ErrorAction SilentlyContinue
-    [Console]::Error.WriteLine("agent-voice: voice override cleared; $curEngine is back to $(Get-VoiceName $curEngine)")
+    Add-Out ("agent-voice: voice override cleared; $curEngine is back to $(Get-VoiceName $curEngine)")
   }
   else {
     $ok = $true
@@ -319,12 +343,12 @@ if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
     }
     if ($ok) {
       Set-Content -Path $vceFlag -Value $arg -NoNewline
-      [Console]::Error.WriteLine("agent-voice: voice for this session is now $arg (engine $curEngine)")
+      Add-Out ("agent-voice: voice for this session is now $arg (engine $curEngine)")
     } else {
-      [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
+      Add-Out ("agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list.")
     }
   }
-  exit 2
+  Send-Out
 }
 
 # voice speed <n>: how fast the summary is read, in this session only. One scale
@@ -337,30 +361,30 @@ if ($sid -and $cmd -match '^voice speed\b(.*)$') {
   # speeds and a numbered menu would be ambiguous.
   if (-not $arg) {
     $cur = if (Test-Path $spdFlag) { (Get-Content $spdFlag -Raw).Trim() } else { Get-DefaultSpeed $curEngine }
-    [Console]::Error.WriteLine("agent-voice: speed is ${cur}x now. Any number from 0.5 to 2.0 works, for example:")
+    Add-Out ("agent-voice: speed is ${cur}x now. Any number from 0.5 to 2.0 works, for example:")
     foreach ($p in @('0.75|slower', '1.0|normal', '1.25|brisk', '1.5|fast', '1.75|very fast', '2.0|maximum')) {
       $q = $p.Split('|')
       $mark = if ([double]$q[0] -eq [double]$cur) { '*' } else { ' ' }
-      [Console]::Error.WriteLine(("  {0} {1,-5} {2}" -f $mark, $q[0], $q[1]))
+      Add-Out (("  {0} {1,-5} {2}" -f $mark, $q[0], $q[1]))
     }
-    [Console]::Error.WriteLine('  Choose with: voice speed 1.5')
-    exit 2
+    Add-Out ('  Choose with: voice speed 1.5')
+    Send-Out
   }
   if ($arg -eq 'default') {
     Remove-Item $spdFlag -Force -ErrorAction SilentlyContinue
     $eng = if (Test-Path $engFlag) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
-    [Console]::Error.WriteLine("agent-voice: speed override cleared; back to $(Get-DefaultSpeed $eng)x")
+    Add-Out ("agent-voice: speed override cleared; back to $(Get-DefaultSpeed $eng)x")
   }
   else {
     $val = 0.0
     if ([double]::TryParse($arg, [ref]$val) -and $val -ge $SPEED_MIN -and $val -le $SPEED_MAX) {
       Set-Content -Path $spdFlag -Value $val -NoNewline
-      [Console]::Error.WriteLine("agent-voice: speed for this session is now ${val}x (1.0 is normal)")
+      Add-Out ("agent-voice: speed for this session is now ${val}x (1.0 is normal)")
     } else {
-      [Console]::Error.WriteLine("agent-voice: speed must be a number between $SPEED_MIN and $SPEED_MAX, for example 'voice speed 1.5'. Use 'voice speed default' to reset.")
+      Add-Out ("agent-voice: speed must be a number between $SPEED_MIN and $SPEED_MAX, for example 'voice speed 1.5'. Use 'voice speed default' to reset.")
     }
   }
-  exit 2
+  Send-Out
 }
 
 if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status')) {
@@ -368,18 +392,18 @@ if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status'))
     'voice on' {
       New-Item -ItemType File -Force -Path $onFlag | Out-Null
       Remove-Item $offFlag, $textFlag -Force -ErrorAction SilentlyContinue
-      [Console]::Error.WriteLine('agent-voice: ON (summary + speech) for this session.')
+      Add-Out ('agent-voice: ON (summary + speech) for this session.')
     }
     'voice text' {
       New-Item -ItemType File -Force -Path $onFlag   | Out-Null
       New-Item -ItemType File -Force -Path $textFlag | Out-Null
       Remove-Item $offFlag -Force -ErrorAction SilentlyContinue
-      [Console]::Error.WriteLine('agent-voice: TEXT-ONLY summary (no audio) for this session.')
+      Add-Out ('agent-voice: TEXT-ONLY summary (no audio) for this session.')
     }
     'voice off' {
       Remove-Item $onFlag, $textFlag -Force -ErrorAction SilentlyContinue
       New-Item -ItemType File -Force -Path $offFlag | Out-Null
-      [Console]::Error.WriteLine('agent-voice: OFF for this session.')
+      Add-Out ('agent-voice: OFF for this session.')
     }
     'voice status' {
       $st = if ($sid -and (Test-Path $textFlag)) { 'TEXT-ONLY (summary, no audio)' }
@@ -392,16 +416,16 @@ if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status'))
       $spdFrom  = if ($sid -and (Test-Path $spdFlag)) { 'this session' } else { 'default' }
       $vceName = if ($sid -and (Test-Path $vceFlag)) { "$((Get-Content $vceFlag -Raw).Trim()) (this session)" }
                  else { "$(Get-VoiceName $engName) (default)" }
-      [Console]::Error.WriteLine("agent-voice: $st")
-      [Console]::Error.WriteLine("  engine  $engName ($engFrom)")
-      [Console]::Error.WriteLine("  voice   $vceName")
-      [Console]::Error.WriteLine("  speed   ${spdVal}x ($spdFrom, 1.0 is normal)")
+      Add-Out ("agent-voice: $st")
+      Add-Out ("  engine  $engName ($engFrom)")
+      Add-Out ("  voice   $vceName")
+      Add-Out ("  speed   ${spdVal}x ($spdFrom, 1.0 is normal)")
       if ($engName -eq 'elevenlabs') {
-        [Console]::Error.WriteLine('  note    ElevenLabs ignores speed; it has no rate control in this integration.')
+        Add-Out ('  note    ElevenLabs ignores speed; it has no rate control in this integration.')
       }
     }
   }
-  exit 2   # block the command from reaching Claude
+  Send-Out
 }
 
 # --- 2. inject the summary instruction when active ---

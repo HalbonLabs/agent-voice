@@ -71,6 +71,12 @@ cur_engine="$cfg_engine"
 [ -f "$eng_flag" ] && cur_engine="$(cat "$eng_flag")"
 vce_flag="$STATE/voice.$cur_engine.$sid"
 
+# The command replies are written to stderr below, which the terminal shows but the
+# VS Code extension does not. Rather than rewrite forty call sites, the dispatch is
+# wrapped and its output captured, then re-emitted as the structured JSON that every
+# client understands: "decision": "block" stops the prompt reaching the model just as
+# exit 2 did, and "reason" is shown to the user.
+handle_command() {
 if [ -n "$sid" ]; then
   case "$cmd" in
     "voice stop"|"shush"|"stop voice")
@@ -83,7 +89,7 @@ if [ -n "$sid" ]; then
       else
         echo "agent-voice: shush.sh is missing; re-run the installer." >&2
       fi
-      exit 2 ;;
+      return 2 ;;
 
     "voice help")
       {
@@ -104,7 +110,7 @@ if [ -n "$sid" ]; then
         echo "  Add 'default' to reset one, for example: voice speed default"
         echo "  Stop speech immediately: type voice stop, or run ~/.agent-voice/shush.sh"
       } >&2
-      exit 2 ;;
+      return 2 ;;
 
     "voice pick")
       # The same arrow-key picker the installer uses, in its own Terminal window,
@@ -122,7 +128,7 @@ if [ -n "$sid" ]; then
         echo "agent-voice: no window to open here. Run it yourself in another terminal:" >&2
         echo "  bash ~/.agent-voice/pick-voice.sh --session $sid" >&2
       fi
-      exit 2 ;;
+      return 2 ;;
 
     "voice preview"|"voice preview "*)
       # Hear a voice without switching to it. Backgrounded so the hook returns at
@@ -131,7 +137,7 @@ if [ -n "$sid" ]; then
       arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
       if [ "$cur_engine" != "kokoro" ]; then
         echo "agent-voice: preview only works on Kokoro, which synthesises locally. You are on '$cur_engine'." >&2
-        exit 2
+        return 2
       fi
       case "$arg" in
         [0-9]*)
@@ -146,7 +152,7 @@ if [ -n "$sid" ]; then
         (ROOT="$ROOT" bash "$ROOT/pick-voice.sh" --preview "$arg" >/dev/null 2>&1 &)
         echo "agent-voice: playing $arg. Switch to it with: voice model $arg" >&2
       fi
-      exit 2 ;;
+      return 2 ;;
 
     "voice list"|"voice list "*|"voice model"|"voice model "*|"voice voice"|"voice voice "*)
       # Bare lists what is available, a number or an id selects, 'default' clears.
@@ -206,7 +212,7 @@ if [ -n "$sid" ]; then
 
       if [ -z "$arg" ] || [ "$arg" = "all" ]; then
         if [ "$arg" = "all" ]; then show_voices 1; else show_voices 0; fi
-        exit 2
+        return 2
       fi
 
       # A bare number selects from the list just shown.
@@ -241,7 +247,7 @@ if [ -n "$sid" ]; then
           echo "agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list." >&2
         fi
       fi
-      exit 2 ;;
+      return 2 ;;
 
     "voice speed"|"voice speed "*)
       # How fast the summary is read, in this session only. One scale across all
@@ -261,7 +267,7 @@ if [ -n "$sid" ]; then
           printf '  %s %-5s %s\n' "$mark" "$v" "$d" >&2
         done
         echo "  Choose with: voice speed 1.5" >&2
-        exit 2
+        return 2
       fi
       if [ "$arg" = "default" ]; then
         rm -f "$spd_flag"
@@ -274,7 +280,7 @@ if [ -n "$sid" ]; then
       else
         echo "agent-voice: speed must be a number between 0.5 and 2.0, for example 'voice speed 1.5'. Use 'voice speed default' to reset." >&2
       fi
-      exit 2 ;;
+      return 2 ;;
     "voice engine"|"voice engine "*)
       arg="${cmd#voice engine}"
       arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -304,7 +310,7 @@ if [ -n "$sid" ]; then
           i=$((i + 1))
         done
         echo "  * is in use now. Choose with: voice engine 2   (or: voice engine kokoro)" >&2
-        exit 2
+        return 2
       fi
       if [ "$arg" = "default" ]; then
         rm -f "$eng_flag"
@@ -324,7 +330,7 @@ if [ -n "$sid" ]; then
       else
         echo "agent-voice: unknown engine '$arg'. Choose from: $ENGINES, or 'default'." >&2
       fi
-      exit 2 ;;
+      return 2 ;;
     "voice on")
       : > "$on_flag"; rm -f "$off_flag" "$text_flag"
       echo "agent-voice: ON (summary + speech) for this session." >&2; exit 2 ;;
@@ -354,8 +360,29 @@ if [ -n "$sid" ]; then
         echo "  speed   ${spd_val}x ($spd_from, 1.0 is normal)"
         [ "$eng_name" = "elevenlabs" ] && echo "  note    ElevenLabs ignores speed; it has no rate control in this integration."
       } >&2
-      exit 2 ;;
+      return 2 ;;
   esac
+fi
+  return 0
+}
+
+cmd_out="$(handle_command 2>&1)"
+cmd_rc=$?
+if [ "$cmd_rc" = "2" ]; then
+  printf '%s' "$cmd_out" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c).on("end", () => {
+      const text = s.replace(/\n+$/, "");
+      process.stdout.write(JSON.stringify({
+        decision: "block",
+        reason: text,
+        systemMessage: text,
+        suppressOutput: true
+      }) + "\n");
+      process.stderr.write(text + "\n");
+    });
+  '
+  exit 0
 fi
 
 # Inject the instruction when active.
