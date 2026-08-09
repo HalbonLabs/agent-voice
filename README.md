@@ -140,7 +140,15 @@ hook, act on that session only, and never reach the model:
 - `voice on`     summary plus spoken audio
 - `voice text`   summary only, no audio
 - `voice off`    back to normal long replies, no summary, no audio
-- `voice status` show the current session's state
+- `voice status` show this session's state and the engine it will use
+- `voice engine <name>` use a different engine in this session only, where
+  `<name>` is `edge`, `kokoro`, `elevenlabs` or `native`. `voice engine default`
+  goes back to the installed choice.
+
+`voice engine` is how you compare voices without reinstalling: set one window to
+`edge` and another to `kokoro` and they will speak differently at the same time.
+Switching to `kokoro` also starts warming the model straight away, so the first
+reply on it is not slow.
 
 Global controls:
 

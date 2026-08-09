@@ -35,6 +35,16 @@ if (-not $active) { exit 0 }
 # Text-only mode: the summary is injected, but we produce no audio.
 if ($sid -and (Test-Path $textFlag)) { exit 0 }
 
+# A per-session engine override ("voice engine kokoro") beats the installed default,
+# so different windows can speak with different engines at the same time.
+if ($sid) {
+  $engFlag = Join-Path $state "engine.$sid"
+  if (Test-Path $engFlag) {
+    $override = (Get-Content $engFlag -Raw).Trim()
+    if ($override) { $engine = $override }
+  }
+}
+
 $msg = [string]$j.last_assistant_message
 if ([string]::IsNullOrWhiteSpace($msg)) { exit 0 }
 $m = [regex]::Match($msg, '(?s)<spoken>(.*?)</spoken>')

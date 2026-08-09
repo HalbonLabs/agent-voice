@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # agent-voice UserPromptSubmit hook (macOS).
-#   1. Intercepts in-session commands: voice on / voice text / voice off / voice status.
+#   1. Intercepts in-session commands: voice on / voice text / voice off /
+#      voice status / voice engine <name>.
 #   2. Otherwise injects the <spoken> summary instruction when voice is active.
 
 ROOT="$HOME/.agent-voice"
 STATE="$ROOT/state"
 mkdir -p "$STATE"
+
+ENGINES="edge kokoro elevenlabs native"
+
+# Installed default engine, used when a session has no override of its own.
+cfg_engine="edge"
+[ -f "$ROOT/config" ] && cfg_engine="$(sed -n 's/^[[:space:]]*engine[[:space:]]*=[[:space:]]*//p' "$ROOT/config" | tail -1)"
+[ -z "$cfg_engine" ] && cfg_engine="edge"
 
 RAW="$(cat)"
 sid="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" session_id)"
@@ -15,12 +23,35 @@ global_on="$STATE/voice-on"
 on_flag="$STATE/on.$sid"
 off_flag="$STATE/off.$sid"
 text_flag="$STATE/text.$sid"
+eng_flag="$STATE/engine.$sid"
 
 # Normalise the command: lowercase, strip a leading slash or backslash.
 cmd="$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#^[\\/]##')"
 
 if [ -n "$sid" ]; then
   case "$cmd" in
+    "voice engine"|"voice engine "*)
+      arg="${cmd#voice engine}"
+      arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      if [ -z "$arg" ] || [ "$arg" = "default" ]; then
+        rm -f "$eng_flag"
+        echo "agent-voice: engine override cleared; this session uses the default ($cfg_engine)." >&2
+      elif printf '%s' " $ENGINES " | grep -q " $arg "; then
+        printf '%s' "$arg" > "$eng_flag"
+        note=""
+        if [ "$arg" = "elevenlabs" ] && [ ! -f "$ROOT/elevenlabs-key" ]; then
+          note=" (no API key stored, so it will fall back to the native voice)"
+        fi
+        if [ "$arg" = "kokoro" ] && [ -f "$ROOT/kokoro_serve.py" ]; then
+          # Warm the model now so the first reply on the new engine is not slow.
+          (python3 "$ROOT/kokoro_serve.py" "$STATE" >/dev/null 2>&1 &)
+          note=" (warming the model now)"
+        fi
+        echo "agent-voice: engine for this session is now $arg$note" >&2
+      else
+        echo "agent-voice: unknown engine '$arg'. Choose from: $ENGINES, or 'default'." >&2
+      fi
+      exit 2 ;;
     "voice on")
       : > "$on_flag"; rm -f "$off_flag" "$text_flag"
       echo "agent-voice: ON (summary + speech) for this session." >&2; exit 2 ;;
@@ -35,7 +66,9 @@ if [ -n "$sid" ]; then
       elif [ -f "$on_flag" ]; then st="ON (summary + speech)"
       elif [ -f "$global_on" ] && [ ! -f "$off_flag" ]; then st="ON (global default)"
       else st="OFF"; fi
-      echo "agent-voice: $st" >&2; exit 2 ;;
+      if [ -f "$eng_flag" ]; then eng="$(cat "$eng_flag") (this session)"
+      else eng="$cfg_engine (default)"; fi
+      echo "agent-voice: $st, engine $eng" >&2; exit 2 ;;
   esac
 fi
 

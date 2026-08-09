@@ -128,4 +128,5 @@ Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host 'Reload any open agent session so it picks up the hooks.'
 Write-Host 'In any session, type:  voice on  |  voice text  |  voice off  |  voice status'
+Write-Host 'Try another engine in one session only:  voice engine edge  (or kokoro/elevenlabs/native)'
 Write-Host 'Stop speech anytime:   Ctrl+Alt+S'

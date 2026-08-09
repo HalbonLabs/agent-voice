@@ -30,6 +30,13 @@ fi
 # Text-only mode: no audio.
 [ -n "$sid" ] && [ -f "$text_flag" ] && exit 0
 
+# A per-session engine override ("voice engine kokoro") beats the installed default,
+# so different windows can speak with different engines at the same time.
+if [ -n "$sid" ] && [ -f "$STATE/engine.$sid" ]; then
+  override="$(cat "$STATE/engine.$sid")"
+  [ -n "$override" ] && engine="$override"
+fi
+
 msg="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" last_assistant_message)"
 [ -z "$msg" ] && exit 0
 spoken="$(printf '%s' "$msg" | node "$ROOT/lib/extract-spoken.mjs")"
