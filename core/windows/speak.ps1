@@ -69,6 +69,21 @@ if ($sid) {
   }
 }
 
+# Speed is one number across every engine, 1.0 being normal. Each engine below
+# converts it to whatever it actually wants, so the user only ever sees one scale.
+$speedMul = $null
+if ($sid) {
+  $spdFlag = Join-Path $state "speed.$sid"
+  if (Test-Path $spdFlag) {
+    $v = 0.0
+    if ([double]::TryParse((Get-Content $spdFlag -Raw).Trim(), [ref]$v)) { $speedMul = $v }
+  }
+}
+if ($null -eq $speedMul -and $cfg.voice_speed) {
+  $v = 0.0
+  if ([double]::TryParse($cfg.voice_speed, [ref]$v)) { $speedMul = $v }
+}
+
 # Kimi Code's Stop payload has no last_assistant_message at all, so recover the
 # reply from its session transcript. Only runs when the field is genuinely absent,
 # which leaves Claude Code and Codex untouched.
@@ -133,6 +148,11 @@ Remove-Item $wav -Force
 if ($engine -eq 'edge') {
   $voice = if ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
   $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
+  # edge-tts wants a percentage delta, so 1.25x becomes +25%.
+  if ($null -ne $speedMul) {
+    $pct  = [int][Math]::Round(($speedMul - 1) * 100)
+    $rate = if ($pct -ge 0) { "+$pct%" } else { "$pct%" }
+  }
   & $pyExe -m edge_tts --text "$text" --voice $voice --rate=$rate --write-media "$mp3" 2>$null
   if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
 }
@@ -141,7 +161,7 @@ elseif ($engine -eq 'kokoro') {
   # if it is not. The very first call ever also downloads weights, and that turn
   # takes ~12s or falls back to SAPI.
   $voice = if ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
-  $speed = if ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
+  $speed = if ($null -ne $speedMul) { $speedMul } elseif ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
   $py    = Join-Path $root 'kokoro-tts.py'
   if (Test-Path $py) {
     $prev = $OutputEncoding
@@ -172,7 +192,8 @@ elseif ($engine -eq 'elevenlabs') {
 if (-not $spoke) {
   Add-Type -AssemblyName System.Speech
   $sapi = New-Object System.Speech.Synthesis.SpeechSynthesizer
-  $sapi.Rate = 2
+  # SAPI's scale is -10..10 with 0 normal, so 1.2x lands on its long-standing default of 2.
+  $sapi.Rate = if ($null -ne $speedMul) { [Math]::Max(-10, [Math]::Min(10, [int][Math]::Round(($speedMul - 1) * 10))) } else { 2 }
   $sapi.Speak($text)
   $sapi.Dispose()
 }

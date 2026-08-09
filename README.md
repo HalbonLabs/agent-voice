@@ -181,15 +181,26 @@ hook, act on that session only, and never reach the model:
 - `voice on`     summary plus spoken audio
 - `voice text`   summary only, no audio
 - `voice off`    back to normal long replies, no summary, no audio
-- `voice status` show this session's state and the engine it will use
+- `voice status` show this session's state, plus the engine, the exact voice and
+  the speed it will use, and where each of those came from
 - `voice engine <name>` use a different engine in this session only, where
   `<name>` is `edge`, `kokoro`, `elevenlabs` or `native`. `voice engine default`
   goes back to the installed choice.
+
+- `voice speed <n>` how fast the summary is read, in this session only, where 1.0
+  is normal and the range is 0.5 to 2.0. `voice speed default` resets it.
 
 `voice engine` is how you compare voices without reinstalling: set one window to
 `edge` and another to `kokoro` and they will speak differently at the same time.
 Switching to `kokoro` also starts warming the model straight away, so the first
 reply on it is not slow.
+
+`voice speed` exists because a spoken summary you have already half-read is
+usually something you want to get through quickly. It is one scale across every
+engine, and each converts it to whatever it actually wants: Kokoro takes the
+multiplier directly, edge-tts takes a percentage delta, and the native voices take
+their own rate scale. ElevenLabs has no rate control in this integration, so it
+ignores speed and `voice status` says so.
 
 Global controls:
 

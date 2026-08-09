@@ -11,15 +11,43 @@ $state = Join-Path $root 'state'
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 
 $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
+$SPEED_MIN = 0.5
+$SPEED_MAX = 2.0
 
-# Installed default engine, used when a session has no override of its own.
-$cfgEngine = 'edge'
-$cfgPython = 'python'
+# Installed defaults, used when a session has no override of its own.
+$cfg = @{}
 $cfgFile = Join-Path $root 'config'
 if (Test-Path $cfgFile) {
   Get-Content $cfgFile | ForEach-Object {
-    if ($_ -match '^\s*engine\s*=\s*(.+)$')                       { $cfgEngine = $matches[1].Trim() }
-    elseif ($_ -match '^\s*(?:python_cmd|kokoro_python)\s*=\s*(.+)$') { $cfgPython = $matches[1].Trim() }
+    if ($_ -match '^\s*([^#=]+?)\s*=\s*(.*)$') { $cfg[$matches[1].Trim()] = $matches[2].Trim() }
+  }
+}
+$cfgEngine = if ($cfg.engine) { $cfg.engine } else { 'edge' }
+$cfgPython = if ($cfg.python_cmd) { $cfg.python_cmd } elseif ($cfg.kokoro_python) { $cfg.kokoro_python } else { 'python' }
+
+# Speed is one number across every engine, 1.0 being normal, because each engine
+# expresses it differently (Kokoro a multiplier, edge-tts a percentage, SAPI a
+# -10..10 scale). The engines convert it; the user sees one scale.
+function Get-DefaultSpeed ($engine) {
+  if ($cfg.voice_speed) { return [double]$cfg.voice_speed }
+  switch ($engine) {
+    'kokoro' { if ($cfg.kokoro_speed) { return [double]$cfg.kokoro_speed } else { return 1.15 } }
+    'edge'   {
+      if ($cfg.edge_rate -and ($cfg.edge_rate -match '^([+-]?\d+)%$')) { return 1 + ([double]$matches[1] / 100) }
+      return 1.15
+    }
+    'native' { return 1.2 }
+    default  { return 1.0 }
+  }
+}
+
+# What the reply will actually be spoken with, and where each part came from.
+function Get-VoiceName ($engine) {
+  switch ($engine) {
+    'kokoro'     { if ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' } }
+    'edge'       { if ($cfg.edge_voice)   { $cfg.edge_voice }   else { 'en-US-AvaNeural' } }
+    'elevenlabs' { if ($cfg.eleven_voice) { $cfg.eleven_voice } else { 'JBFqnCBsd6RMkjVDRZzb' } }
+    default      { if ($cfg.native_voice) { $cfg.native_voice } else { 'system default' } }
   }
 }
 
@@ -49,6 +77,7 @@ $onFlag   = if ($sid) { Join-Path $state "on.$sid" }
 $offFlag  = if ($sid) { Join-Path $state "off.$sid" }
 $textFlag = if ($sid) { Join-Path $state "text.$sid" }
 $engFlag  = if ($sid) { Join-Path $state "engine.$sid" }
+$spdFlag  = if ($sid) { Join-Path $state "speed.$sid" }
 
 # --- 1. in-session commands ---
 $cmd = ($prompt.Trim().ToLower()) -replace '^[\\/]', ''
@@ -81,6 +110,28 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
   exit 2
 }
 
+# voice speed <n>: how fast the summary is read, in this session only. One scale
+# across all engines, 1.0 normal, because spoken summaries are often the thing you
+# want to get through quickly.
+if ($sid -and $cmd -match '^voice speed\b(.*)$') {
+  $arg = $matches[1].Trim()
+  if (-not $arg -or $arg -eq 'default') {
+    Remove-Item $spdFlag -Force -ErrorAction SilentlyContinue
+    $eng = if (Test-Path $engFlag) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
+    [Console]::Error.WriteLine("agent-voice: speed override cleared; back to $(Get-DefaultSpeed $eng)x")
+  }
+  else {
+    $val = 0.0
+    if ([double]::TryParse($arg, [ref]$val) -and $val -ge $SPEED_MIN -and $val -le $SPEED_MAX) {
+      Set-Content -Path $spdFlag -Value $val -NoNewline
+      [Console]::Error.WriteLine("agent-voice: speed for this session is now ${val}x (1.0 is normal)")
+    } else {
+      [Console]::Error.WriteLine("agent-voice: speed must be a number between $SPEED_MIN and $SPEED_MAX, for example 'voice speed 1.5'. Use 'voice speed default' to reset.")
+    }
+  }
+  exit 2
+}
+
 if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status')) {
   switch ($cmd) {
     'voice on' {
@@ -104,9 +155,17 @@ if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status'))
             elseif ($sid -and (Test-Path $onFlag)) { 'ON (summary + speech)' }
             elseif ((Test-Path $globalOn) -and -not (Test-Path $offFlag)) { 'ON (global default)' }
             else { 'OFF' }
-      $eng = if ($sid -and (Test-Path $engFlag)) { "$((Get-Content $engFlag -Raw).Trim()) (this session)" }
-             else { "$cfgEngine (default)" }
-      [Console]::Error.WriteLine("agent-voice: $st, engine $eng")
+      $engName  = if ($sid -and (Test-Path $engFlag)) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
+      $engFrom  = if ($sid -and (Test-Path $engFlag)) { 'this session' } else { 'default' }
+      $spdVal   = if ($sid -and (Test-Path $spdFlag)) { (Get-Content $spdFlag -Raw).Trim() } else { Get-DefaultSpeed $engName }
+      $spdFrom  = if ($sid -and (Test-Path $spdFlag)) { 'this session' } else { 'default' }
+      [Console]::Error.WriteLine("agent-voice: $st")
+      [Console]::Error.WriteLine("  engine  $engName ($engFrom)")
+      [Console]::Error.WriteLine("  voice   $(Get-VoiceName $engName)")
+      [Console]::Error.WriteLine("  speed   ${spdVal}x ($spdFrom, 1.0 is normal)")
+      if ($engName -eq 'elevenlabs') {
+        [Console]::Error.WriteLine('  note    ElevenLabs ignores speed; it has no rate control in this integration.')
+      }
     }
   }
   exit 2   # block the command from reaching Claude

@@ -44,6 +44,12 @@ if [ -n "$sid" ] && [ -f "$STATE/engine.$sid" ]; then
   [ -n "$override" ] && engine="$override"
 fi
 
+# Speed is one number across every engine, 1.0 being normal. Each engine below
+# converts it to whatever it actually wants, so the user only ever sees one scale.
+speed_mul=""
+[ -n "$sid" ] && [ -f "$STATE/speed.$sid" ] && speed_mul="$(cat "$STATE/speed.$sid")"
+[ -z "$speed_mul" ] && speed_mul="${voice_speed:-}"
+
 msg="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" last_assistant_message)"
 
 # Kimi Code's Stop payload has no last_assistant_message at all, so recover the
@@ -76,6 +82,8 @@ wav="$STATE/say.$tag.wav"
   if [ "$engine" = "edge" ]; then
     voice="${edge_voice:-en-US-AvaNeural}"
     rate="${edge_rate:-+15%}"
+    # edge-tts wants a percentage delta, so 1.25x becomes +25%.
+    [ -n "$speed_mul" ] && rate="$(awk -v m="$speed_mul" 'BEGIN{p=sprintf("%.0f",(m-1)*100)+0; printf (p>=0 ? "+%d%%" : "%d%%"), p}')"
     "$py_cmd" -m edge_tts --text "$spoken" --voice "$voice" --rate="$rate" --write-media "$mp3" 2>/dev/null
     # Only count it as spoken if afplay itself succeeded, so a playback failure
     # falls through to `say` instead of leaving the reply silent.
@@ -85,7 +93,7 @@ wav="$STATE/say.$tag.wav"
     # if it is not. The very first call ever also downloads weights, and that turn
     # takes ~12s or falls back to `say`.
     voice="${kokoro_voice:-bf_emma}"
-    speed="${kokoro_speed:-1.15}"
+    speed="${speed_mul:-${kokoro_speed:-1.15}}"
     if [ -f "$ROOT/kokoro-tts.py" ]; then
       printf '%s' "$spoken" | "$py_cmd" "$ROOT/kokoro-tts.py" "$wav" "$voice" "$speed" 2>/dev/null
       if [ -s "$wav" ] && [ "$(wc -c < "$wav")" -gt 500 ] && afplay "$wav"; then spoke=1; fi
@@ -104,7 +112,10 @@ wav="$STATE/say.$tag.wav"
 
   # Fallback: offline macOS `say`.
   if [ "$spoke" = 0 ]; then
-    if [ -n "${native_voice:-}" ]; then say -v "$native_voice" "$spoken"; else say "$spoken"; fi
+    # say takes words per minute; its default is about 175.
+    say_args=""
+    [ -n "$speed_mul" ] && say_args="-r $(awk -v m="$speed_mul" 'BEGIN{printf "%d", 175*m}')"
+    if [ -n "${native_voice:-}" ]; then say $say_args -v "$native_voice" "$spoken"; else say $say_args "$spoken"; fi
   fi
 
   rm -f "$mp3" "$wav" "$pidfile"
