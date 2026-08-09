@@ -14,10 +14,12 @@ $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
 
 # Installed default engine, used when a session has no override of its own.
 $cfgEngine = 'edge'
+$cfgPython = 'python'
 $cfgFile = Join-Path $root 'config'
 if (Test-Path $cfgFile) {
   Get-Content $cfgFile | ForEach-Object {
-    if ($_ -match '^\s*engine\s*=\s*(.+)$') { $cfgEngine = $matches[1].Trim() }
+    if ($_ -match '^\s*engine\s*=\s*(.+)$')                       { $cfgEngine = $matches[1].Trim() }
+    elseif ($_ -match '^\s*(?:python_cmd|kokoro_python)\s*=\s*(.+)$') { $cfgPython = $matches[1].Trim() }
   }
 }
 
@@ -68,7 +70,7 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
     if ($arg -eq 'kokoro') {
       # Warm the model now so the first reply on the new engine is not slow.
       $serve = Join-Path $root 'kokoro_serve.py'
-      if (Test-Path $serve) { Start-Process -FilePath 'python' -ArgumentList @($serve, $state) -WindowStyle Hidden }
+      if (Test-Path $serve) { Start-Process -FilePath $cfgPython -ArgumentList @($serve, $state) -WindowStyle Hidden }
       $note = ' (warming the model now)'
     }
     [Console]::Error.WriteLine("agent-voice: engine for this session is now $arg$note")

@@ -31,7 +31,7 @@ You choose per session whether you want the audio, just the text, or nothing.
 | -------------- | ------------------------------- | ------------ | ------------ |
 | Claude Code    | `~/.claude/settings.json`       | Yes          | Yes          |
 | Codex CLI      | `~/.codex/hooks.json`           | Yes          | Yes (test it)|
-| Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Pending      |
+| Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Yes (via transcript) |
 
 Claude Code is fully built and tested end to end.
 
@@ -55,10 +55,15 @@ straight out of the raw text and unescapes them, so the reply is still spoken an
 the `voice ...` commands still work. Verified against a payload reproducing the
 bug, on both hooks.
 
-Kimi supports the summary text via `UserPromptSubmit`, but its `Stop` event does
-not currently expose the assistant's final message, so spoken audio is pending
-upstream support. On Kimi it degrades gracefully: you still get the text TL;DR,
-just no sound.
+Kimi Code works too, including voice, but by a different route. Its `Stop` payload
+carries only `hook_event_name`, `session_id`, `cwd` and `stop_hook_active`, with no
+assistant message at all, so there is nothing in the payload to read. agent-voice
+therefore recovers the reply from Kimi's own session transcript
+(`~/.kimi-code/sessions/<workspace>/<session>/agents/main/wire.jsonl`), taking the
+last complete assistant text part of the turn. That path only runs when
+`last_assistant_message` is genuinely absent, so Claude Code and Codex are
+untouched by it. The transcript format is undocumented; if Kimi changes it, Kimi
+sessions fall silent again rather than misbehaving.
 
 ## How it works
 

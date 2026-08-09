@@ -12,7 +12,13 @@ ENGINES="edge kokoro elevenlabs native"
 
 # Installed default engine, used when a session has no override of its own.
 cfg_engine="edge"
-[ -f "$ROOT/config" ] && cfg_engine="$(sed -n 's/^[[:space:]]*engine[[:space:]]*=[[:space:]]*//p' "$ROOT/config" | tail -1)"
+cfg_python="python3"
+if [ -f "$ROOT/config" ]; then
+  cfg_engine="$(sed -n 's/^[[:space:]]*engine[[:space:]]*=[[:space:]]*//p' "$ROOT/config" | tail -1)"
+  # python_cmd is the current spelling; kokoro_python is accepted as an older one.
+  found_py="$(sed -n 's/^[[:space:]]*\(python_cmd\|kokoro_python\)[[:space:]]*=[[:space:]]*//p' "$ROOT/config" | tail -1)"
+  [ -n "$found_py" ] && cfg_python="$found_py"
+fi
 [ -z "$cfg_engine" ] && cfg_engine="edge"
 
 RAW="$(cat)"
@@ -44,7 +50,7 @@ if [ -n "$sid" ]; then
         fi
         if [ "$arg" = "kokoro" ] && [ -f "$ROOT/kokoro_serve.py" ]; then
           # Warm the model now so the first reply on the new engine is not slow.
-          (python3 "$ROOT/kokoro_serve.py" "$STATE" >/dev/null 2>&1 &)
+          ("$cfg_python" "$ROOT/kokoro_serve.py" "$STATE" >/dev/null 2>&1 &)
           note=" (warming the model now)"
         fi
         echo "agent-voice: engine for this session is now $arg$note" >&2

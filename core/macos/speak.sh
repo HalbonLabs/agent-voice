@@ -11,6 +11,13 @@ mkdir -p "$STATE"
 [ -f "$ROOT/config" ] && . "$ROOT/config"
 engine="${engine:-edge}"
 
+# Which interpreter to use. Bare python3 resolves against the PATH of whichever
+# agent launched the hook, which is not necessarily the one the dependencies were
+# installed into: a project venv earlier on PATH produces a missing-dependency
+# exit and a silent drop to the robotic voice. The installer records the
+# interpreter it verified. kokoro_python is accepted as an older spelling.
+py_cmd="${python_cmd:-${kokoro_python:-python3}}"
+
 RAW="$(cat)"
 [ -z "$RAW" ] && exit 0
 sid="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" session_id)"
@@ -38,6 +45,16 @@ if [ -n "$sid" ] && [ -f "$STATE/engine.$sid" ]; then
 fi
 
 msg="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" last_assistant_message)"
+
+# Kimi Code's Stop payload has no last_assistant_message at all, so recover the
+# reply from its session transcript. Only runs when the field is genuinely absent,
+# which leaves Claude Code and Codex untouched.
+if [ -z "$msg" ] && [ -f "$ROOT/lib/kimi-last-text.mjs" ]; then
+  case "$sid" in
+    session_*) msg="$(node "$ROOT/lib/kimi-last-text.mjs" "$sid" "$HOME")" ;;
+  esac
+fi
+
 [ -z "$msg" ] && exit 0
 spoken="$(printf '%s' "$msg" | node "$ROOT/lib/extract-spoken.mjs")"
 [ -z "$spoken" ] && exit 0
@@ -59,18 +76,18 @@ wav="$STATE/say.$tag.wav"
   if [ "$engine" = "edge" ]; then
     voice="${edge_voice:-en-US-AvaNeural}"
     rate="${edge_rate:-+15%}"
-    python3 -m edge_tts --text "$spoken" --voice "$voice" --rate="$rate" --write-media "$mp3" 2>/dev/null
+    "$py_cmd" -m edge_tts --text "$spoken" --voice "$voice" --rate="$rate" --write-media "$mp3" 2>/dev/null
     # Only count it as spoken if afplay itself succeeded, so a playback failure
     # falls through to `say` instead of leaving the reply silent.
     if [ -s "$mp3" ] && afplay "$mp3"; then spoke=1; fi
   elif [ "$engine" = "kokoro" ]; then
-    # Offline neural voice. Slow to start: ~8.6s of process startup on every turn
-    # (fresh process each time) plus ~1.6s synthesis, so ~10-12s before audio.
-    # The very first call ever also downloads weights; that turn falls back to `say`.
+    # Offline neural voice. ~1.7s once the warm daemon is up; the client starts one
+    # if it is not. The very first call ever also downloads weights, and that turn
+    # takes ~12s or falls back to `say`.
     voice="${kokoro_voice:-bf_emma}"
     speed="${kokoro_speed:-1.15}"
     if [ -f "$ROOT/kokoro-tts.py" ]; then
-      printf '%s' "$spoken" | python3 "$ROOT/kokoro-tts.py" "$wav" "$voice" "$speed" 2>/dev/null
+      printf '%s' "$spoken" | "$py_cmd" "$ROOT/kokoro-tts.py" "$wav" "$voice" "$speed" 2>/dev/null
       if [ -s "$wav" ] && [ "$(wc -c < "$wav")" -gt 500 ] && afplay "$wav"; then spoke=1; fi
     fi
   elif [ "$engine" = "elevenlabs" ]; then

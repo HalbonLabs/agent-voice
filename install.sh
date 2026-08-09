@@ -31,7 +31,7 @@ name_of()      { case "$1" in claude) echo "Claude Code";; codex) echo "Codex CL
 note_of()      { case "$1" in
                    claude) echo "fully supported (summary + voice)";;
                    codex)  echo "supported; checked against the docs, not yet run live";;
-                   kimi)   echo "summary text only; voice pending upstream support";;
+                   kimi)   echo "supported (summary + voice) via its session transcript";;
                  esac; }
 dir_of()       { case "$1" in claude) echo "$HOME/.claude";; codex) echo "$HOME/.codex";; kimi) echo "$HOME/.kimi-code";; esac; }
 cfg_of()       { case "$1" in
@@ -123,6 +123,15 @@ echo "Agents: $agents"
 # Does the python3 the hooks will actually call work?
 have_python() {
   python3 -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1
+}
+
+# Record the full path of the interpreter we just verified, rather than leaving the
+# hooks to resolve bare python3 later. They run with whatever PATH the agent that
+# launched them has, which may put a project venv first, and a venv without the
+# dependencies means a silent drop to the robotic voice.
+python_path() {
+  p="$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null)"
+  if [ -n "$p" ] && [ -x "$p" ]; then printf '%s' "$p"; else printf 'python3'; fi
 }
 
 # Shared message for the two engines that need Python. Falling back to native is
@@ -320,6 +329,7 @@ case "$choice" in
       echo "engine=kokoro" >> "$CFG"
       echo "kokoro_voice=$kv" >> "$CFG"
       echo "kokoro_speed=1.15" >> "$CFG"
+      echo "python_cmd=$(python_path)" >> "$CFG"
       echo "Voice: $kv"
     fi
     ;;
@@ -335,6 +345,7 @@ case "$choice" in
       echo "engine=edge" >> "$CFG"
       echo "edge_voice=en-US-AvaNeural" >> "$CFG"
       echo "edge_rate=+15%" >> "$CFG"
+      echo "python_cmd=$(python_path)" >> "$CFG"
       echo "edge-tts (Ava) selected."
       if ! python3 -m edge_tts --version >/dev/null 2>&1; then
         echo "Installing edge-tts (pip3 install --user edge-tts) ..."

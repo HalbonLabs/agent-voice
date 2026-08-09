@@ -31,7 +31,7 @@ function Get-Agents {
   $defs = @(
     @{ Key='claude'; Name='Claude Code';   Note='fully supported (summary + voice)';                            Dir='.claude';    Cfg='.claude\settings.json' },
     @{ Key='codex';  Name='Codex CLI';     Note='supported; checked against the docs, not yet run live';        Dir='.codex';     Cfg='.codex\hooks.json' },
-    @{ Key='kimi';   Name='Kimi Code CLI'; Note='summary text only; voice pending upstream support';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' }
+    @{ Key='kimi';   Name='Kimi Code CLI'; Note='supported (summary + voice) via its session transcript';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' }
   )
   foreach ($d in $defs) {
     $cfgPath = Join-Path $h $d.Cfg
@@ -133,6 +133,19 @@ function Test-Python {
     $v = & python -c 'import sys; print(sys.version_info[0])' 2>$null
     return ($LASTEXITCODE -eq 0 -and (($v | Out-String).Trim() -eq '3'))
   } catch { return $false }
+}
+
+# Record the full path of the interpreter we just verified, rather than leaving the
+# hooks to resolve bare "python" later. They run with whatever PATH the agent that
+# launched them has, which may put a project venv first, and a venv without the
+# dependencies means a silent drop to the robotic voice.
+function Get-PythonPath {
+  try {
+    $p = & python -c 'import sys; print(sys.executable)' 2>$null
+    $p = ($p | Out-String).Trim()
+    if ($p -and (Test-Path $p)) { return $p }
+  } catch { }
+  return 'python'
 }
 
 # Shared message for the two engines that need Python. Falling back to native is
@@ -351,6 +364,7 @@ switch ($choice) {
     }
 
     $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
+    $cfg += ("python_cmd=" + (Get-PythonPath))
     Write-Host ("Voice: " + $kv) -ForegroundColor Green
   }
   '4' {
@@ -360,6 +374,7 @@ switch ($choice) {
   default {
     if (-not (Test-Python)) { Deny-PythonEngine 'edge-tts'; $cfg += 'engine=native'; break }
     $cfg += 'engine=edge'; $cfg += 'edge_voice=en-US-AvaNeural'; $cfg += 'edge_rate=+15%'
+    $cfg += ("python_cmd=" + (Get-PythonPath))
     Write-Host 'edge-tts (Ava) selected.' -ForegroundColor Green
     $have = $false
     try { python -m edge_tts --version *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}

@@ -16,6 +16,13 @@ if (Test-Path $cfgFile) {
 }
 $engine = if ($cfg.engine) { $cfg.engine } else { 'edge' }
 
+# Which interpreter to use. Bare "python" resolves against the PATH of whichever
+# agent launched the hook, which is not necessarily the one the dependencies were
+# installed into: a project venv earlier on PATH produces a missing-dependency
+# exit and a silent drop to the robotic voice. The installer records the
+# interpreter it verified. kokoro_python is accepted as an older spelling.
+$pyExe = if ($cfg.python_cmd) { $cfg.python_cmd } elseif ($cfg.kokoro_python) { $cfg.kokoro_python } else { 'python' }
+
 $raw = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
 
@@ -60,6 +67,14 @@ if ($sid) {
     $override = (Get-Content $engFlag -Raw).Trim()
     if ($override) { $engine = $override }
   }
+}
+
+# Kimi Code's Stop payload has no last_assistant_message at all, so recover the
+# reply from its session transcript. Only runs when the field is genuinely absent,
+# which leaves Claude Code and Codex untouched.
+if ([string]::IsNullOrWhiteSpace($msg) -and $sid -like 'session_*') {
+  $kimi = Join-Path $root 'lib\kimi-last-text.mjs'
+  if (Test-Path $kimi) { $msg = (node $kimi $sid $env:USERPROFILE) -join "`n" }
 }
 
 if ([string]::IsNullOrWhiteSpace($msg)) { exit 0 }
@@ -118,20 +133,20 @@ Remove-Item $wav -Force
 if ($engine -eq 'edge') {
   $voice = if ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
   $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
-  python -m edge_tts --text "$text" --voice $voice --rate=$rate --write-media "$mp3" 2>$null
+  & $pyExe -m edge_tts --text "$text" --voice $voice --rate=$rate --write-media "$mp3" 2>$null
   if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
 }
 elseif ($engine -eq 'kokoro') {
-  # Offline neural voice. Slow to start: ~8.6s of process startup on every turn
-  # (fresh process each time) plus ~1.6s synthesis, so ~10-12s before audio.
-  # The very first call ever also downloads weights; that turn falls back to SAPI.
+  # Offline neural voice. ~1.7s once the warm daemon is up; the client starts one
+  # if it is not. The very first call ever also downloads weights, and that turn
+  # takes ~12s or falls back to SAPI.
   $voice = if ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
   $speed = if ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
   $py    = Join-Path $root 'kokoro-tts.py'
   if (Test-Path $py) {
     $prev = $OutputEncoding
     $OutputEncoding = New-Object Text.UTF8Encoding $false
-    $text | python $py $wav $voice $speed 2>$null
+    $text | & $pyExe $py $wav $voice $speed 2>$null
     $OutputEncoding = $prev
     if ((Test-Path $wav) -and ((Get-Item $wav).Length -gt 500)) { $spoke = Play-Wav $wav }
   }
