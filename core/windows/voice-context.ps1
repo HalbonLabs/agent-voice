@@ -1,7 +1,8 @@
 # agent-voice UserPromptSubmit hook (Windows).
 #   1. Intercepts the in-session commands: voice on / voice text / voice off /
 #      voice status / voice engine <name> (each affects only the session it is
-#      typed in, keyed on session_id, and never reaches Claude).
+#      typed in, keyed on session_id; the hook carries it out and hands the reply
+#      to the model to print, since that is the only output every client shows).
 #   2. Otherwise, when voice is active for this session, injects the instruction that
 #      asks Claude to end its reply with a plain-language <spoken> summary.
 
@@ -11,21 +12,20 @@ $state = Join-Path $root 'state'
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 
 $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
-# How a command replies to the user.
-#
-# Writing to stderr and exiting 2 is documented to show the text to the user, and
-# it does in the terminal, but the VS Code extension does not render it, so the
-# commands looked like they did nothing. Structured JSON on stdout with exit 0 is
-# the first-class mechanism: "decision": "block" stops the prompt reaching the
-# model exactly as exit 2 did, "reason" is shown to the user, and "systemMessage"
-# is a second channel for clients that surface that instead.
+$SPEED_MIN = 0.5
+$SPEED_MAX = 2.0
+
+# A command's reply is collected here and emitted by Send-Out below.
 $script:outLines = New-Object System.Collections.Generic.List[string]
 function Add-Out ($line) { $script:outLines.Add([string]$line) }
 
-# A record of the last command and its reply. Clients differ in what they render,
-# so when nothing appears this answers the first question: did the hook run and
-# produce a reply at all, or not run?
+# Off unless you put debug=1 in ~/.agent-voice/config. When a client shows nothing
+# this answers the first question in one attempt: did the hook run and produce a
+# reply, or not run at all? It stays off by default because it would otherwise
+# write part of every prompt to disk, which sits badly with a tool whose whole
+# claim is that your prompts go nowhere.
 function Write-HookLog ($line) {
+  if (-not $cfg -or $cfg['debug'] -ne '1') { return }
   try {
     Add-Content -Path (Join-Path $state 'hook.log') -Value ("{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $line)
   } catch { }
@@ -65,9 +65,6 @@ $text
   [Console]::Error.WriteLine($text)
   exit 0
 }
-
-$SPEED_MIN = 0.5
-$SPEED_MAX = 2.0
 
 # Installed defaults, used when a session has no override of its own.
 $cfg = @{}

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # agent-voice UserPromptSubmit hook (macOS).
-#   1. Intercepts in-session commands: voice on / voice text / voice off /
-#      voice status / voice engine <name>.
+#   1. Intercepts in-session commands (voice on / text / off / status / engine /
+#      model / speed / preview / pick / stop / list / help). The hook carries the
+#      command out and hands the reply to the model to print, since that is the
+#      only output every client shows.
 #   2. Otherwise injects the <spoken> summary instruction when voice is active.
 
 ROOT="$HOME/.agent-voice"
