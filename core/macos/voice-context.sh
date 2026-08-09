@@ -64,8 +64,95 @@ spd_flag="$STATE/speed.$sid"
 # Normalise the command: lowercase, strip a leading slash or backslash.
 cmd="$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#^[\\/]##')"
 
+# The engine in effect for this session, which the voice commands below act on.
+cur_engine="$cfg_engine"
+[ -f "$eng_flag" ] && cur_engine="$(cat "$eng_flag")"
+vce_flag="$STATE/voice.$cur_engine.$sid"
+
 if [ -n "$sid" ]; then
   case "$cmd" in
+    "voice help")
+      {
+        echo "agent-voice commands (each affects this session only):"
+        echo "  voice on                summary plus spoken audio"
+        echo "  voice text              summary only, no audio"
+        echo "  voice off               back to normal replies"
+        echo "  voice status            what this session will use right now"
+        echo "  voice engine <name>     edge | kokoro | elevenlabs | native"
+        echo "  voice model <id>        change the voice itself, e.g. voice model af_heart"
+        echo "  voice speed <n>         0.5 to 2.0, where 1.0 is normal"
+        echo "  voice list              voices available for the current engine"
+        echo "  voice help              this list"
+        echo ""
+        echo "  Add 'default' to reset one, for example: voice speed default"
+        echo "  Stop speech immediately: run ~/.agent-voice/shush.sh"
+      } >&2
+      exit 2 ;;
+
+    "voice list"|"voice list "*)
+      arg="${cmd#voice list}"
+      arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      case "$cur_engine" in
+        kokoro)
+          if [ -f "$ROOT/lib/kokoro-voices.json" ]; then
+            filter="British American"
+            [ "$arg" = "all" ] && filter=""
+            node -e '
+              const v = require(process.argv[1]);
+              const f = process.argv[2] ? process.argv[2].split(" ") : null;
+              const rows = f ? v.filter(x => f.includes(x.lang)) : v;
+              console.error(`agent-voice: Kokoro voices (${rows.length} shown). Grades are the model own.`);
+              for (const r of rows) console.error(`  ${r.id.padEnd(14)} ${r.lang.padEnd(11)} ${r.sex.padEnd(7)} grade ${r.grade}`);
+            ' "$ROOT/lib/kokoro-voices.json" "$filter"
+            [ -n "$filter" ] && echo "  'voice list all' also shows the other 7 languages." >&2
+            echo "  Switch with: voice model <id>" >&2
+          fi ;;
+        edge)
+          {
+            echo "agent-voice: common edge-tts voices:"
+            echo "  en-GB-SoniaNeural   British female"
+            echo "  en-GB-RyanNeural    British male"
+            echo "  en-US-AvaNeural     American female"
+            echo "  en-US-AndrewNeural  American male"
+            echo "  Full list: python3 -m edge_tts --list-voices"
+            echo "  Switch with: voice model <id>"
+          } >&2 ;;
+        elevenlabs)
+          {
+            echo "agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library."
+            echo "  Switch with: voice model <voice-id>"
+          } >&2 ;;
+        *)
+          {
+            echo "agent-voice: the native engine uses the voice built into the OS."
+            echo "  macOS: System Settings > Accessibility > Spoken Content > System Voice."
+          } >&2 ;;
+      esac
+      exit 2 ;;
+
+    "voice model"|"voice model "*|"voice voice"|"voice voice "*)
+      # Change the voice itself for this session. Stored per engine, so switching
+      # engine does not carry a Kokoro id over to edge-tts where it means nothing.
+      arg="${cmd#voice }"; arg="${arg#model}"; arg="${arg#voice}"
+      arg="$(printf '%s' "$arg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      if [ -z "$arg" ] || [ "$arg" = "default" ]; then
+        rm -f "$vce_flag"
+        echo "agent-voice: voice override cleared; $cur_engine is back to $(voice_name "$cur_engine")" >&2
+      else
+        ok=1
+        if [ "$cur_engine" = "kokoro" ] && [ -f "$ROOT/lib/kokoro-voices.json" ]; then
+          node -e 'process.exit(require(process.argv[1]).some(v => v.id === process.argv[2]) ? 0 : 1)' \
+            "$ROOT/lib/kokoro-voices.json" "$arg" || ok=0
+        fi
+        if [ "$ok" = 1 ]; then
+          printf '%s' "$arg" > "$vce_flag"
+          echo "agent-voice: voice for this session is now $arg (engine $cur_engine)" >&2
+        else
+          echo "agent-voice: '$arg' is not a Kokoro voice. Try 'voice list' to see them." >&2
+        fi
+      fi
+      exit 2 ;;
+
     "voice speed"|"voice speed "*)
       # How fast the summary is read, in this session only. One scale across all
       # engines, 1.0 normal, since spoken summaries are often the thing you want
@@ -127,7 +214,11 @@ if [ -n "$sid" ]; then
       {
         echo "agent-voice: $st"
         echo "  engine  $eng_name ($eng_from)"
-        echo "  voice   $(voice_name "$eng_name")"
+        if [ -f "$STATE/voice.$eng_name.$sid" ]; then
+          echo "  voice   $(cat "$STATE/voice.$eng_name.$sid") (this session)"
+        else
+          echo "  voice   $(voice_name "$eng_name") (default)"
+        fi
         echo "  speed   ${spd_val}x ($spd_from, 1.0 is normal)"
         [ "$eng_name" = "elevenlabs" ] && echo "  note    ElevenLabs ignores speed; it has no rate control in this integration."
       } >&2

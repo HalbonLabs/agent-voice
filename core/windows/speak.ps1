@@ -69,6 +69,17 @@ if ($sid) {
   }
 }
 
+# A per-session voice override ("voice model af_heart"), stored per engine so that
+# switching engine cannot carry a Kokoro id over to edge-tts where it means nothing.
+$voiceOverride = $null
+if ($sid) {
+  $vceFlag = Join-Path $state "voice.$engine.$sid"
+  if (Test-Path $vceFlag) {
+    $v = (Get-Content $vceFlag -Raw).Trim()
+    if ($v) { $voiceOverride = $v }
+  }
+}
+
 # Speed is one number across every engine, 1.0 being normal. Each engine below
 # converts it to whatever it actually wants, so the user only ever sees one scale.
 $speedMul = $null
@@ -146,7 +157,7 @@ Remove-Item $mp3 -Force
 Remove-Item $wav -Force
 
 if ($engine -eq 'edge') {
-  $voice = if ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
+  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
   $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
   # edge-tts wants a percentage delta, so 1.25x becomes +25%.
   if ($null -ne $speedMul) {
@@ -160,7 +171,7 @@ elseif ($engine -eq 'kokoro') {
   # Offline neural voice. ~1.7s once the warm daemon is up; the client starts one
   # if it is not. The very first call ever also downloads weights, and that turn
   # takes ~12s or falls back to SAPI.
-  $voice = if ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
+  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
   $speed = if ($null -ne $speedMul) { $speedMul } elseif ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
   $py    = Join-Path $root 'kokoro-tts.py'
   if (Test-Path $py) {
@@ -174,7 +185,7 @@ elseif ($engine -eq 'kokoro') {
 elseif ($engine -eq 'elevenlabs') {
   $keyFile = Join-Path $root 'elevenlabs-key'
   $key = if (Test-Path $keyFile) { (Get-Content $keyFile -Raw).Trim() } else { '' }
-  $voice = if ($cfg.eleven_voice) { $cfg.eleven_voice } else { 'JBFqnCBsd6RMkjVDRZzb' }
+  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.eleven_voice) { $cfg.eleven_voice } else { 'JBFqnCBsd6RMkjVDRZzb' }
   $model = if ($cfg.eleven_model) { $cfg.eleven_model } else { 'eleven_flash_v2_5' }
   if ($key) {
     try {

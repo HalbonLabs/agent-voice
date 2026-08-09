@@ -160,66 +160,10 @@ function Deny-PythonEngine ($engineName) {
   Write-Host 'Using Native offline for now, so you still get a working voice.' -ForegroundColor Green
 }
 
-# Kokoro's voices, with the quality grades published in the model's own VOICES.md.
-# The grades vary a lot, so they are shown rather than hidden: bf_emma is the best
-# British voice at B-, while every British male tops out at C.
-$KOKORO_VOICES = @(
-  @{ Id='bf_emma';       Lang='British';  Sex='Female'; Grade='B-' },
-  @{ Id='bf_isabella';   Lang='British';  Sex='Female'; Grade='C'  },
-  @{ Id='bf_alice';      Lang='British';  Sex='Female'; Grade='D'  },
-  @{ Id='bf_lily';       Lang='British';  Sex='Female'; Grade='D'  },
-  @{ Id='bm_fable';      Lang='British';  Sex='Male';   Grade='C'  },
-  @{ Id='bm_george';     Lang='British';  Sex='Male';   Grade='C'  },
-  @{ Id='bm_lewis';      Lang='British';  Sex='Male';   Grade='D+' },
-  @{ Id='bm_daniel';     Lang='British';  Sex='Male';   Grade='D'  },
-  @{ Id='af_heart';      Lang='American'; Sex='Female'; Grade='A'  },
-  @{ Id='af_bella';      Lang='American'; Sex='Female'; Grade='A-' },
-  @{ Id='af_nicole';     Lang='American'; Sex='Female'; Grade='B-' },
-  @{ Id='af_aoede';      Lang='American'; Sex='Female'; Grade='C+' },
-  @{ Id='af_kore';       Lang='American'; Sex='Female'; Grade='C+' },
-  @{ Id='af_sarah';      Lang='American'; Sex='Female'; Grade='C+' },
-  @{ Id='af_alloy';      Lang='American'; Sex='Female'; Grade='C'  },
-  @{ Id='af_nova';       Lang='American'; Sex='Female'; Grade='C'  },
-  @{ Id='af_sky';        Lang='American'; Sex='Female'; Grade='C-' },
-  @{ Id='af_jessica';    Lang='American'; Sex='Female'; Grade='D'  },
-  @{ Id='af_river';      Lang='American'; Sex='Female'; Grade='D'  },
-  @{ Id='am_fenrir';     Lang='American'; Sex='Male';   Grade='C+' },
-  @{ Id='am_michael';    Lang='American'; Sex='Male';   Grade='C+' },
-  @{ Id='am_puck';       Lang='American'; Sex='Male';   Grade='C+' },
-  @{ Id='am_echo';       Lang='American'; Sex='Male';   Grade='D'  },
-  @{ Id='am_eric';       Lang='American'; Sex='Male';   Grade='D'  },
-  @{ Id='am_liam';       Lang='American'; Sex='Male';   Grade='D'  },
-  @{ Id='am_onyx';       Lang='American'; Sex='Male';   Grade='D'  },
-  @{ Id='am_santa';      Lang='American'; Sex='Male';   Grade='D-' },
-  @{ Id='am_adam';       Lang='American'; Sex='Male';   Grade='F+' },
-  @{ Id='ff_siwis';      Lang='French';   Sex='Female'; Grade='B-' },
-  @{ Id='jf_alpha';      Lang='Japanese'; Sex='Female'; Grade='C+' },
-  @{ Id='jf_gongitsune'; Lang='Japanese'; Sex='Female'; Grade='C'  },
-  @{ Id='jf_tebukuro';   Lang='Japanese'; Sex='Female'; Grade='C'  },
-  @{ Id='jf_nezumi';     Lang='Japanese'; Sex='Female'; Grade='C-' },
-  @{ Id='jm_kumo';       Lang='Japanese'; Sex='Male';   Grade='C-' },
-  @{ Id='hf_alpha';      Lang='Hindi';    Sex='Female'; Grade='C'  },
-  @{ Id='hf_beta';       Lang='Hindi';    Sex='Female'; Grade='C'  },
-  @{ Id='hm_omega';      Lang='Hindi';    Sex='Male';   Grade='C'  },
-  @{ Id='hm_psi';        Lang='Hindi';    Sex='Male';   Grade='C'  },
-  @{ Id='if_sara';       Lang='Italian';  Sex='Female'; Grade='C'  },
-  @{ Id='im_nicola';     Lang='Italian';  Sex='Male';   Grade='C'  },
-  @{ Id='zf_xiaoxiao';   Lang='Mandarin'; Sex='Female'; Grade='D'  },
-  @{ Id='zf_xiaobei';    Lang='Mandarin'; Sex='Female'; Grade='D'  },
-  @{ Id='zf_xiaoni';     Lang='Mandarin'; Sex='Female'; Grade='D'  },
-  @{ Id='zf_xiaoyi';     Lang='Mandarin'; Sex='Female'; Grade='D'  },
-  @{ Id='zm_yunjian';    Lang='Mandarin'; Sex='Male';   Grade='D'  },
-  @{ Id='zm_yunxi';      Lang='Mandarin'; Sex='Male';   Grade='D'  },
-  @{ Id='zm_yunxia';     Lang='Mandarin'; Sex='Male';   Grade='D'  },
-  @{ Id='zm_yunyang';    Lang='Mandarin'; Sex='Male';   Grade='D'  },
-  @{ Id='ef_dora';       Lang='Spanish';  Sex='Female'; Grade='-'  },
-  @{ Id='em_alex';       Lang='Spanish';  Sex='Male';   Grade='-'  },
-  @{ Id='em_santa';      Lang='Spanish';  Sex='Male';   Grade='-'  },
-  @{ Id='pf_dora';       Lang='Portuguese'; Sex='Female'; Grade='-' },
-  @{ Id='pm_alex';       Lang='Portuguese'; Sex='Male';   Grade='-' },
-  @{ Id='pm_santa';      Lang='Portuguese'; Sex='Male';   Grade='-' }
-)
-
+# Kokoro's voices come from lib/kokoro-voices.json, the same file the hooks read for
+# "voice list" and for validating "voice model", so the ids and the published quality
+# grades cannot drift between what you can install and what you can switch to.
+$KOKORO_VOICES = @(Get-Content (Join-Path $src 'lib\kokoro-voices.json') -Raw | ConvertFrom-Json)
 # Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
 # selection now happens after the model has been pre-loaded.
 function Invoke-VoicePreview ($target, $state, $voice) {
@@ -245,7 +189,7 @@ function Select-Voice ($voices, $target, $state, $default) {
     return $typed.Trim()
   }
 
-  $pos = [Math]::Max(0, [array]::IndexOf(($voices | ForEach-Object { $_.Id }), $default))
+  $pos = [Math]::Max(0, [array]::IndexOf(($voices | ForEach-Object { $_.id }), $default))
   $view = [Math]::Min(12, $voices.Count)
   $rows = $view + 2                      # list lines, a scroll hint, and a status line
   $start = 0
@@ -267,7 +211,7 @@ function Select-Voice ($voices, $target, $state, $default) {
       for ($i = $start; $i -lt $start + $view; $i++) {
         $v = $voices[$i]
         $cur = if ($i -eq $pos) { '>' } else { ' ' }
-        $line = "{0} {1,-14} {2,-11} {3,-7} grade {4}" -f $cur, $v.Id, $v.Lang, $v.Sex, $v.Grade
+        $line = "{0} {1,-14} {2,-11} {3,-7} grade {4}" -f $cur, $v.id, $v.lang, $v.sex, $v.grade
         if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
         $colour = if ($i -eq $pos) { 'Cyan' } else { 'Gray' }
         Write-Host ($line.PadRight($width)) -ForegroundColor $colour
@@ -280,9 +224,9 @@ function Select-Voice ($voices, $target, $state, $default) {
 
       if ($pending) {
         $pending = $false
-        $ok = Invoke-VoicePreview $target $state $voices[$pos].Id
-        $status = if ($ok) { "Played $($voices[$pos].Id). Press P again, or Enter to choose it." }
-                  else { "Could not synthesise $($voices[$pos].Id). Try another." }
+        $ok = Invoke-VoicePreview $target $state $voices[$pos].id
+        $status = if ($ok) { "Played $($voices[$pos].id). Press P again, or Enter to choose it." }
+                  else { "Could not synthesise $($voices[$pos].id). Try another." }
         continue
       }
 
@@ -294,10 +238,10 @@ function Select-Voice ($voices, $target, $state, $default) {
         'PageDown'  { $pos = [Math]::Min($voices.Count - 1, $pos + $view) }
         'Home'      { $pos = 0 }
         'End'       { $pos = $voices.Count - 1 }
-        'Enter'     { Write-Host ''; return $voices[$pos].Id }
+        'Enter'     { Write-Host ''; return $voices[$pos].id }
         default {
           if ($key.KeyChar -eq 'p' -or $key.KeyChar -eq 'P') {
-            $status = "Synthesising $($voices[$pos].Id) ..."
+            $status = "Synthesising $($voices[$pos].id) ..."
             $pending = $true
           }
         }
@@ -418,5 +362,6 @@ Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host 'Reload any open agent session so it picks up the hooks.'
 Write-Host 'In any session, type:  voice on  |  voice text  |  voice off  |  voice status'
-Write-Host 'Per session:  voice engine edge  (or kokoro/elevenlabs/native)  |  voice speed 1.5'
+Write-Host 'Also per session:  voice engine  |  voice model  |  voice speed  |  voice list'
+Write-Host 'Forgotten one? Type:  voice help'
 Write-Host 'Stop speech anytime:   Ctrl+Alt+S'

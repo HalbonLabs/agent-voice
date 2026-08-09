@@ -149,33 +149,14 @@ deny_python_engine() {
   echo "Using Native offline for now, so you still get a working voice."
 }
 
-# Kokoro's voices, with the quality grades published in the model's own VOICES.md.
-# The grades vary a lot, so they are shown rather than hidden: bf_emma is the best
-# British voice at B-, while every British male tops out at C.
-KOKORO_VOICES=(
-  "bf_emma|British|Female|B-"      "bf_isabella|British|Female|C"   "bf_alice|British|Female|D"
-  "bf_lily|British|Female|D"       "bm_fable|British|Male|C"        "bm_george|British|Male|C"
-  "bm_lewis|British|Male|D+"       "bm_daniel|British|Male|D"
-  "af_heart|American|Female|A"     "af_bella|American|Female|A-"    "af_nicole|American|Female|B-"
-  "af_aoede|American|Female|C+"    "af_kore|American|Female|C+"     "af_sarah|American|Female|C+"
-  "af_alloy|American|Female|C"     "af_nova|American|Female|C"      "af_sky|American|Female|C-"
-  "af_jessica|American|Female|D"   "af_river|American|Female|D"
-  "am_fenrir|American|Male|C+"     "am_michael|American|Male|C+"    "am_puck|American|Male|C+"
-  "am_echo|American|Male|D"        "am_eric|American|Male|D"        "am_liam|American|Male|D"
-  "am_onyx|American|Male|D"        "am_santa|American|Male|D-"      "am_adam|American|Male|F+"
-  "ff_siwis|French|Female|B-"
-  "jf_alpha|Japanese|Female|C+"    "jf_gongitsune|Japanese|Female|C" "jf_tebukuro|Japanese|Female|C"
-  "jf_nezumi|Japanese|Female|C-"   "jm_kumo|Japanese|Male|C-"
-  "hf_alpha|Hindi|Female|C"        "hf_beta|Hindi|Female|C"         "hm_omega|Hindi|Male|C"
-  "hm_psi|Hindi|Male|C"
-  "if_sara|Italian|Female|C"       "im_nicola|Italian|Male|C"
-  "zf_xiaoxiao|Mandarin|Female|D"  "zf_xiaobei|Mandarin|Female|D"   "zf_xiaoni|Mandarin|Female|D"
-  "zf_xiaoyi|Mandarin|Female|D"    "zm_yunjian|Mandarin|Male|D"     "zm_yunxi|Mandarin|Male|D"
-  "zm_yunxia|Mandarin|Male|D"      "zm_yunyang|Mandarin|Male|D"
-  "ef_dora|Spanish|Female|-"       "em_alex|Spanish|Male|-"         "em_santa|Spanish|Male|-"
-  "pf_dora|Portuguese|Female|-"    "pm_alex|Portuguese|Male|-"      "pm_santa|Portuguese|Male|-"
+# Kokoro's voices come from lib/kokoro-voices.json, the same file the hooks read for
+# "voice list" and for validating "voice model", so the ids and the published quality
+# grades cannot drift between what you can install and what you can switch to.
+KOKORO_VOICES=()
+while IFS= read -r line; do KOKORO_VOICES+=("$line"); done < <(
+  node -e 'for (const v of require(process.argv[1])) console.log(`${v.id}|${v.lang}|${v.sex}|${v.grade}`)' \
+    "$SRC/lib/kokoro-voices.json"
 )
-
 # Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
 # selection happens after the model has been pre-loaded.
 preview_voice() {
@@ -371,5 +352,6 @@ echo ""
 echo "Done."
 echo "Reload any open agent session so it picks up the hooks."
 echo "In any session, type:  voice on  |  voice text  |  voice off  |  voice status"
-echo "Per session:  voice engine edge  (or kokoro/elevenlabs/native)  |  voice speed 1.5"
+echo "Also per session:  voice engine  |  voice model  |  voice speed  |  voice list"
+echo "Forgotten one? Type:  voice help"
 echo "Stop speech anytime:   run  $TARGET/shush.sh  (bind it to a hotkey via the Shortcuts app)"

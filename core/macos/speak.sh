@@ -44,6 +44,11 @@ if [ -n "$sid" ] && [ -f "$STATE/engine.$sid" ]; then
   [ -n "$override" ] && engine="$override"
 fi
 
+# A per-session voice override ("voice model af_heart"), stored per engine so that
+# switching engine cannot carry a Kokoro id over to edge-tts where it means nothing.
+voice_override=""
+[ -n "$sid" ] && [ -f "$STATE/voice.$engine.$sid" ] && voice_override="$(cat "$STATE/voice.$engine.$sid")"
+
 # Speed is one number across every engine, 1.0 being normal. Each engine below
 # converts it to whatever it actually wants, so the user only ever sees one scale.
 speed_mul=""
@@ -80,7 +85,7 @@ wav="$STATE/say.$tag.wav"
   rm -f "$mp3" "$wav"
 
   if [ "$engine" = "edge" ]; then
-    voice="${edge_voice:-en-US-AvaNeural}"
+    voice="${voice_override:-${edge_voice:-en-US-AvaNeural}}"
     rate="${edge_rate:-+15%}"
     # edge-tts wants a percentage delta, so 1.25x becomes +25%.
     [ -n "$speed_mul" ] && rate="$(awk -v m="$speed_mul" 'BEGIN{p=sprintf("%.0f",(m-1)*100)+0; printf (p>=0 ? "+%d%%" : "%d%%"), p}')"
@@ -92,7 +97,7 @@ wav="$STATE/say.$tag.wav"
     # Offline neural voice. ~1.7s once the warm daemon is up; the client starts one
     # if it is not. The very first call ever also downloads weights, and that turn
     # takes ~12s or falls back to `say`.
-    voice="${kokoro_voice:-bf_emma}"
+    voice="${voice_override:-${kokoro_voice:-bf_emma}}"
     speed="${speed_mul:-${kokoro_speed:-1.15}}"
     if [ -f "$ROOT/kokoro-tts.py" ]; then
       printf '%s' "$spoken" | "$py_cmd" "$ROOT/kokoro-tts.py" "$wav" "$voice" "$speed" 2>/dev/null
@@ -100,7 +105,7 @@ wav="$STATE/say.$tag.wav"
     fi
   elif [ "$engine" = "elevenlabs" ]; then
     key=""; [ -f "$ROOT/elevenlabs-key" ] && key="$(cat "$ROOT/elevenlabs-key")"
-    voice="${eleven_voice:-JBFqnCBsd6RMkjVDRZzb}"
+    voice="${voice_override:-${eleven_voice:-JBFqnCBsd6RMkjVDRZzb}}"
     model="${eleven_model:-eleven_flash_v2_5}"
     if [ -n "$key" ]; then
       body="$(node "$ROOT/lib/eleven-body.mjs" "$spoken" "$model")"

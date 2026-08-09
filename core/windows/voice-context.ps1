@@ -51,6 +51,14 @@ function Get-VoiceName ($engine) {
   }
 }
 
+# Kokoro's catalogue lives in one JSON file shared with the installer, so the ids
+# and grades cannot drift between what you can install and what you can switch to.
+function Get-KokoroVoices {
+  $p = Join-Path $root 'lib\kokoro-voices.json'
+  if (-not (Test-Path $p)) { return @() }
+  try { return @(Get-Content $p -Raw | ConvertFrom-Json) } catch { return @() }
+}
+
 $raw = [Console]::In.ReadToEnd()
 try { $j = $raw | ConvertFrom-Json } catch { $j = $null }
 if ($j) {
@@ -110,6 +118,88 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
   exit 2
 }
 
+# The engine in effect for this session, which the voice commands below act on.
+$curEngine = if ($sid -and (Test-Path $engFlag)) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
+$vceFlag   = if ($sid) { Join-Path $state "voice.$curEngine.$sid" }
+
+# voice help: every command in one place.
+if ($sid -and $cmd -eq 'voice help') {
+  @(
+    'agent-voice commands (each affects this session only):',
+    '  voice on                summary plus spoken audio',
+    '  voice text              summary only, no audio',
+    '  voice off               back to normal replies',
+    '  voice status            what this session will use right now',
+    '  voice engine <name>     edge | kokoro | elevenlabs | native',
+    '  voice model <id>        change the voice itself, e.g. voice model af_heart',
+    '  voice speed <n>         0.5 to 2.0, where 1.0 is normal',
+    '  voice list              voices available for the current engine',
+    '  voice help              this list',
+    '',
+    "  Add 'default' to reset one, for example: voice speed default",
+    '  Stop speech immediately: Ctrl+Alt+S'
+  ) | ForEach-Object { [Console]::Error.WriteLine($_) }
+  exit 2
+}
+
+# voice list: what you can switch to on the engine in effect.
+if ($sid -and $cmd -match '^voice list\b(.*)$') {
+  $showAll = $matches[1].Trim() -eq 'all'
+  if ($curEngine -eq 'kokoro') {
+    $voices = Get-KokoroVoices
+    if (-not $showAll) { $voices = @($voices | Where-Object { $_.lang -in @('British', 'American') }) }
+    [Console]::Error.WriteLine("agent-voice: Kokoro voices ($($voices.Count) shown). Grades are the model's own.")
+    foreach ($v in $voices) {
+      [Console]::Error.WriteLine(("  {0,-14} {1,-11} {2,-7} grade {3}" -f $v.id, $v.lang, $v.sex, $v.grade))
+    }
+    if (-not $showAll) { [Console]::Error.WriteLine("  'voice list all' also shows the other 7 languages.") }
+    [Console]::Error.WriteLine('  Switch with: voice model <id>')
+  }
+  elseif ($curEngine -eq 'edge') {
+    [Console]::Error.WriteLine('agent-voice: common edge-tts voices:')
+    foreach ($v in @('en-GB-SoniaNeural   British female', 'en-GB-RyanNeural    British male',
+                     'en-US-AvaNeural     American female', 'en-US-AndrewNeural  American male')) {
+      [Console]::Error.WriteLine("  $v")
+    }
+    [Console]::Error.WriteLine('  Full list: python -m edge_tts --list-voices')
+    [Console]::Error.WriteLine('  Switch with: voice model <id>')
+  }
+  elseif ($curEngine -eq 'elevenlabs') {
+    [Console]::Error.WriteLine('agent-voice: ElevenLabs voice ids come from your own account at elevenlabs.io/voice-library.')
+    [Console]::Error.WriteLine('  Switch with: voice model <voice-id>')
+  }
+  else {
+    [Console]::Error.WriteLine('agent-voice: the native engine uses the voice built into the OS.')
+    [Console]::Error.WriteLine('  Windows: change it in Settings > Time & language > Speech.')
+  }
+  exit 2
+}
+
+# voice model <id> (voice voice <id> reads naturally too): change the voice itself
+# for this session. Stored per engine, so switching engine does not carry a Kokoro
+# id over to edge-tts, where it would mean nothing.
+if ($sid -and $cmd -match '^voice (?:model|voice)\b(.*)$') {
+  $arg = $matches[1].Trim()
+  if (-not $arg -or $arg -eq 'default') {
+    Remove-Item $vceFlag -Force -ErrorAction SilentlyContinue
+    [Console]::Error.WriteLine("agent-voice: voice override cleared; $curEngine is back to $(Get-VoiceName $curEngine)")
+  }
+  else {
+    $ok = $true
+    if ($curEngine -eq 'kokoro') {
+      $known = @(Get-KokoroVoices | ForEach-Object { $_.id })
+      if ($known.Count -gt 0 -and $known -notcontains $arg) { $ok = $false }
+    }
+    if ($ok) {
+      Set-Content -Path $vceFlag -Value $arg -NoNewline
+      [Console]::Error.WriteLine("agent-voice: voice for this session is now $arg (engine $curEngine)")
+    } else {
+      [Console]::Error.WriteLine("agent-voice: '$arg' is not a Kokoro voice. Try 'voice list' to see them.")
+    }
+  }
+  exit 2
+}
+
 # voice speed <n>: how fast the summary is read, in this session only. One scale
 # across all engines, 1.0 normal, because spoken summaries are often the thing you
 # want to get through quickly.
@@ -159,9 +249,11 @@ if ($sid -and $cmd -in @('voice on', 'voice text', 'voice off', 'voice status'))
       $engFrom  = if ($sid -and (Test-Path $engFlag)) { 'this session' } else { 'default' }
       $spdVal   = if ($sid -and (Test-Path $spdFlag)) { (Get-Content $spdFlag -Raw).Trim() } else { Get-DefaultSpeed $engName }
       $spdFrom  = if ($sid -and (Test-Path $spdFlag)) { 'this session' } else { 'default' }
+      $vceName = if ($sid -and (Test-Path $vceFlag)) { "$((Get-Content $vceFlag -Raw).Trim()) (this session)" }
+                 else { "$(Get-VoiceName $engName) (default)" }
       [Console]::Error.WriteLine("agent-voice: $st")
       [Console]::Error.WriteLine("  engine  $engName ($engFrom)")
-      [Console]::Error.WriteLine("  voice   $(Get-VoiceName $engName)")
+      [Console]::Error.WriteLine("  voice   $vceName")
       [Console]::Error.WriteLine("  speed   ${spdVal}x ($spdFrom, 1.0 is normal)")
       if ($engName -eq 'elevenlabs') {
         [Console]::Error.WriteLine('  note    ElevenLabs ignores speed; it has no rate control in this integration.')

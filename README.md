@@ -187,8 +187,15 @@ hook, act on that session only, and never reach the model:
   `<name>` is `edge`, `kokoro`, `elevenlabs` or `native`. `voice engine default`
   goes back to the installed choice.
 
+- `voice model <id>` change the voice itself for this session, for example
+  `voice model af_heart`. Stored per engine, so switching engine does not carry a
+  Kokoro id over to edge-tts where it would mean nothing.
 - `voice speed <n>` how fast the summary is read, in this session only, where 1.0
   is normal and the range is 0.5 to 2.0. `voice speed default` resets it.
+- `voice list` the voices available on the current engine. For Kokoro that is the
+  English 28 with their grades, and `voice list all` adds the other 7 languages.
+- `voice help` all of the above, in the session, so none of this has to be
+  remembered.
 
 `voice engine` is how you compare voices without reinstalling: set one window to
 `edge` and another to `kokoro` and they will speak differently at the same time.
