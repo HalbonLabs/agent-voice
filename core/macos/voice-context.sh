@@ -73,12 +73,25 @@ vce_flag="$STATE/voice.$cur_engine.$sid"
 
 if [ -n "$sid" ]; then
   case "$cmd" in
+    "voice stop"|"shush"|"stop voice")
+      # Kill speech from inside the session. The hotkey is faster where it exists,
+      # but macOS has none by default, and typing this needs no OS integration at
+      # all. Works everywhere, including over SSH.
+      if [ -f "$ROOT/shush.sh" ]; then
+        bash "$ROOT/shush.sh" >/dev/null 2>&1
+        echo "agent-voice: speech stopped." >&2
+      else
+        echo "agent-voice: shush.sh is missing; re-run the installer." >&2
+      fi
+      exit 2 ;;
+
     "voice help")
       {
         echo "agent-voice commands (each affects this session only):"
         echo "  voice on                summary plus spoken audio"
         echo "  voice text              summary only, no audio"
         echo "  voice off               back to normal replies"
+        echo "  voice stop              stop speech now (also: shush)"
         echo "  voice status            what this session will use right now"
         echo "  voice engine            list engines, then: voice engine 2"
         echo "  voice model             list voices, then: voice model 9"
@@ -89,7 +102,7 @@ if [ -n "$sid" ]; then
         echo "  voice help              this list"
         echo ""
         echo "  Add 'default' to reset one, for example: voice speed default"
-        echo "  Stop speech immediately: run ~/.agent-voice/shush.sh"
+        echo "  Stop speech immediately: type voice stop, or run ~/.agent-voice/shush.sh"
       } >&2
       exit 2 ;;
 

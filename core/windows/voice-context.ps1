@@ -145,6 +145,20 @@ if ($sid -and $cmd -match '^voice engine\b(.*)$') {
 $curEngine = if ($sid -and (Test-Path $engFlag)) { (Get-Content $engFlag -Raw).Trim() } else { $cfgEngine }
 $vceFlag   = if ($sid) { Join-Path $state "voice.$curEngine.$sid" }
 
+# voice stop: kill speech from inside the session. The hotkey is faster where it
+# exists, but macOS has no hotkey by default, and typing this needs no OS
+# integration at all. Works everywhere, including over SSH.
+if ($sid -and ($cmd -eq 'voice stop' -or $cmd -eq 'shush' -or $cmd -eq 'stop voice')) {
+  $shush = Join-Path $root 'shush.ps1'
+  if (Test-Path $shush) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shush *> $null
+    [Console]::Error.WriteLine('agent-voice: speech stopped.')
+  } else {
+    [Console]::Error.WriteLine('agent-voice: shush.ps1 is missing; re-run the installer.')
+  }
+  exit 2
+}
+
 # voice help: every command in one place.
 if ($sid -and $cmd -eq 'voice help') {
   @(
@@ -152,6 +166,7 @@ if ($sid -and $cmd -eq 'voice help') {
     '  voice on                summary plus spoken audio',
     '  voice text              summary only, no audio',
     '  voice off               back to normal replies',
+    '  voice stop              stop speech now (also: shush)',
     '  voice status            what this session will use right now',
     '  voice engine            list engines, then: voice engine 2',
     '  voice model             list voices, then: voice model 9',
@@ -162,7 +177,7 @@ if ($sid -and $cmd -eq 'voice help') {
     '  voice help              this list',
     '',
     "  Add 'default' to reset one, for example: voice speed default",
-    '  Stop speech immediately: Ctrl+Alt+S'
+    '  Stop speech immediately: Ctrl+Alt+S, or type: voice stop'
   ) | ForEach-Object { [Console]::Error.WriteLine($_) }
   exit 2
 }

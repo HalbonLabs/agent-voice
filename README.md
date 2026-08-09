@@ -125,8 +125,8 @@ install it. When stdin is not a real terminal (piped input, CI) it falls back to
 the older comma-separated prompt.
 
 It then asks which voice engine to use, wires the hooks into each agent's config
-without touching anything else already there, and on Windows adds a global stop
-hotkey. Reload any open agent session afterwards so it picks up the hooks.
+without touching anything else already there, and sets up the stop
+shortcut: a real hotkey on Windows, a Quick Action to bind on macOS. Reload any open agent session afterwards so it picks up the hooks.
 
 Re-running the installer later is safe: it strips its own previous hook entries
 before adding them again, so nothing is ever duplicated. Use it to add another
@@ -194,6 +194,7 @@ hook, act on that session only, and never reach the model:
 - `voice on`     summary plus spoken audio
 - `voice text`   summary only, no audio
 - `voice off`    back to normal long replies, no summary, no audio
+- `voice stop`   stop speech immediately, in every session (also `shush`)
 - `voice status` this session's state, plus the engine, the exact voice and the
   speed it will use, and where each of those came from
 - `voice engine` list the engines and mark the one in use, then `voice engine 2`
@@ -241,8 +242,15 @@ ignores speed and `voice status` says so.
 
 Global controls:
 
-- **Stop speech now:** Windows `Ctrl+Alt+S` (or run `shush.cmd`); macOS run
-  `~/.agent-voice/shush.sh` (bind it to a key with the Shortcuts app if you like).
+- **Stop speech now:** type `voice stop` (or just `shush`) in any session. It works
+  on both platforms, needs no setup, and stops speech in *every* session, not only
+  the one you type it in.
+- **Stop speech with a key:** Windows gets `Ctrl+Alt+S` registered for you at
+  install. macOS has no scriptable global-hotkey API, so the installer builds a
+  **Stop agent-voice** Quick Action instead and you assign the key yourself:
+  System Settings > Keyboard > Keyboard Shortcuts > Services > General, find it,
+  click `none`, and press your keys. `Cmd+Alt+S` matches the Windows one. If the
+  Quick Action does not show up, `voice stop` always works.
 - **Global default on/off:** Windows `~/.agent-voice/voice.cmd`; macOS
   `~/.agent-voice/voice.sh`. Sessions with no per-session setting follow this.
 

@@ -134,6 +134,125 @@ python_path() {
   if [ -n "$p" ] && [ -x "$p" ]; then printf '%s' "$p"; else printf 'python3'; fi
 }
 
+# macOS has no scriptable global-hotkey API, so a shortcut cannot simply be
+# registered the way Ctrl+Alt+S is on Windows. What can be done is build the Quick
+# Action for you, leaving only the key assignment, which is two clicks in System
+# Settings. Typing 'voice stop' in a session needs no setup at all and is the
+# fallback if this does not appear.
+install_mac_quick_action() {
+  [ "$(uname)" = "Darwin" ] || return 0
+  qa="$HOME/Library/Services/Stop agent-voice.workflow"
+  mkdir -p "$qa/Contents" 2>/dev/null || return 0
+
+  cat > "$qa/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>Stop agent-voice</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>runWorkflowAsService</string>
+      <key>NSSendTypes</key>
+      <array/>
+      <key>NSReturnTypes</key>
+      <array/>
+    </dict>
+  </array>
+</dict>
+</plist>
+PLIST
+
+  cat > "$qa/Contents/document.wflow" <<WFLOW
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>AMApplicationBuild</key>
+  <string>512</string>
+  <key>AMApplicationVersion</key>
+  <string>2.10</string>
+  <key>AMDocumentVersion</key>
+  <string>2</string>
+  <key>actions</key>
+  <array>
+    <dict>
+      <key>action</key>
+      <dict>
+        <key>AMActionVersion</key>
+        <string>2.0.3</string>
+        <key>ActionBundlePath</key>
+        <string>/System/Library/Automator/Run Shell Script.action</string>
+        <key>ActionName</key>
+        <string>Run Shell Script</string>
+        <key>ActionParameters</key>
+        <dict>
+          <key>COMMAND_STRING</key>
+          <string>bash "$TARGET/shush.sh"</string>
+          <key>CheckedForUserDefaultShell</key>
+          <true/>
+          <key>inputMethod</key>
+          <integer>0</integer>
+          <key>shell</key>
+          <string>/bin/bash</string>
+          <key>source</key>
+          <string></string>
+        </dict>
+        <key>BundleIdentifier</key>
+        <string>com.apple.Automator.RunShellScript</string>
+        <key>Class Name</key>
+        <string>RunShellScriptAction</string>
+        <key>InputUUID</key>
+        <string>7E4F1A20-0001-4A00-9000-AGENTVOICE01</string>
+        <key>OutputUUID</key>
+        <string>7E4F1A20-0002-4A00-9000-AGENTVOICE02</string>
+        <key>UUID</key>
+        <string>7E4F1A20-0003-4A00-9000-AGENTVOICE03</string>
+        <key>arguments</key>
+        <dict/>
+        <key>isViewVisible</key>
+        <integer>1</integer>
+      </dict>
+    </dict>
+  </array>
+  <key>workflowMetaData</key>
+  <dict>
+    <key>serviceInputTypeIdentifier</key>
+    <string>com.apple.Automator.nothing</string>
+    <key>serviceOutputTypeIdentifier</key>
+    <string>com.apple.Automator.nothing</string>
+    <key>serviceApplicationBundleID</key>
+    <string></string>
+    <key>serviceApplicationPath</key>
+    <string></string>
+    <key>presentationMode</key>
+    <integer>0</integer>
+    <key>processesInput</key>
+    <integer>0</integer>
+    <key>workflowTypeIdentifier</key>
+    <string>com.apple.Automator.servicesMenu</string>
+  </dict>
+</dict>
+</plist>
+WFLOW
+
+  # Ask the services system to notice the new Quick Action straight away.
+  /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
+
+  echo ""
+  echo "Stop-speech Quick Action installed. To give it a hotkey (about 20 seconds):"
+  echo "  System Settings > Keyboard > Keyboard Shortcuts > Services > General"
+  echo "  find 'Stop agent-voice', click 'none', and press the keys you want."
+  echo "  Cmd+Alt+S is a good choice, to match Ctrl+Alt+S on Windows."
+  echo "If it does not appear, just type 'voice stop' in any session instead."
+}
+
 # Shared message for the two engines that need Python. Falling back to native is
 # stated out loud rather than done quietly, so nobody ends up wondering why the
 # voice sounds robotic.
@@ -263,10 +382,12 @@ esac
 echo ""
 node "$TARGET/lib/register.mjs" mode=install home="$HOME" platform=mac scripts="$TARGET" providers="$agents"
 
+install_mac_quick_action
+
 echo ""
 echo "Done."
 echo "Reload any open agent session so it picks up the hooks."
 echo "In any session, type:  voice on  |  voice text  |  voice off  |  voice status"
 echo "Also per session:  voice engine  |  voice model  |  voice speed  |  voice list"
 echo "Forgotten one? Type:  voice help"
-echo "Stop speech anytime:   run  $TARGET/shush.sh  (bind it to a hotkey via the Shortcuts app)"
+echo "Stop speech anytime:   type  voice stop  in any session, or run  $TARGET/shush.sh"
