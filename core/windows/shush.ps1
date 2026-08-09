@@ -9,4 +9,10 @@ Get-ChildItem (Join-Path $state 'speak.*.pid') -ErrorAction SilentlyContinue | F
   Remove-Item $_.FullName -ErrorAction SilentlyContinue
 }
 
+# Killing the speak process skips its own cleanup, so tidy up the temp audio here
+# rather than leaving a file per interrupted session behind.
+Get-ChildItem $state -Filter 'say.*' -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.Extension -in @('.wav', '.mp3') } |
+  ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
 Write-Host 'agent-voice: speech stopped.'

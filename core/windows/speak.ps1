@@ -63,9 +63,13 @@ if ($sid) {
 }
 
 if ([string]::IsNullOrWhiteSpace($msg)) { exit 0 }
-$m = [regex]::Match($msg, '(?s)<spoken>(.*?)</spoken>')
-if (-not $m.Success) { exit 0 }
-$text = ($m.Groups[1].Value -replace '[`*#_>|]', '') -replace '\s+', ' '
+# Take the LAST block, and require its content not to contain another opening tag.
+# Both matter: a naive non-greedy match runs from the first <spoken> to the first
+# </spoken>, so one mistyped closing tag earlier in the reply makes it span two
+# blocks and read the entire reply aloud.
+$blocks = [regex]::Matches($msg, '(?s)<spoken>((?:(?!<spoken>).)*?)</spoken>')
+if ($blocks.Count -eq 0) { exit 0 }
+$text = ($blocks[$blocks.Count - 1].Groups[1].Value -replace '[`*#_>|]', '') -replace '\s+', ' '
 $text = $text.Trim()
 if ([string]::IsNullOrWhiteSpace($text)) { exit 0 }
 
