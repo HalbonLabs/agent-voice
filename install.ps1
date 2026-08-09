@@ -68,39 +68,53 @@ function Select-Agents ($items) {
   Write-Host 'Up/Down to move, Space to toggle, A for all, Enter to confirm.' -ForegroundColor DarkGray
   Write-Host ''
   $pos = 0
-  $top = [Console]::CursorTop
-  $width = [Math]::Max(60, [Console]::WindowWidth - 1)
-  while ($true) {
-    [Console]::SetCursorPosition(0, $top)
-    for ($i = 0; $i -lt $items.Count; $i++) {
-      $it = $items[$i]
-      $cursor = if ($i -eq $pos) { '>' } else { ' ' }
-      $box    = if ($sel[$it.Key]) { '[x]' } else { '[ ]' }
-      $tag    = if (-not $it.Installed) { '  (not detected on this machine)' } elseif ($it.Registered) { '  (already set up)' } else { '' }
-      $line   = "{0} {1} {2,-16} {3}{4}" -f $cursor, $box, $it.Name, $it.Note, $tag
-      if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
-      $colour = if (-not $it.Installed) { 'DarkGray' } elseif ($i -eq $pos) { 'Cyan' } else { 'Gray' }
-      Write-Host ($line.PadRight($width)) -ForegroundColor $colour
-    }
-    $chosen = @($items | Where-Object { $sel[$_.Key] })
-    Write-Host (("  selected: " + $(if ($chosen) { ($chosen.Key) -join ', ' } else { 'none yet' })).PadRight($width)) -ForegroundColor DarkGray
+  $rows = $items.Count + 1          # the item lines, plus the "selected:" line
+  $width = [Math]::Max(40, [Console]::WindowWidth - 1)
+  $firstDraw = $true
+  $hadCursor = $true
+  try { $hadCursor = [Console]::CursorVisible; [Console]::CursorVisible = $false } catch { }
+  try {
+    while ($true) {
+      # Move UP from wherever the cursor is now, rather than back to a row captured
+      # before the loop: writing at the bottom of the buffer scrolls the console,
+      # which shifts every absolute row and made each redraw land below the last.
+      if ($firstDraw) { $firstDraw = $false }
+      else { [Console]::SetCursorPosition(0, [Math]::Max(0, [Console]::CursorTop - $rows)) }
 
-    $key = [Console]::ReadKey($true)
-    switch ($key.Key) {
-      'UpArrow'   { $pos = ($pos - 1 + $items.Count) % $items.Count }
-      'DownArrow' { $pos = ($pos + 1) % $items.Count }
-      'Spacebar'  { $sel[$items[$pos].Key] = -not $sel[$items[$pos].Key] }
-      'Enter'     {
-        $out = @($items | Where-Object { $sel[$_.Key] } | ForEach-Object { $_.Key })
-        if ($out.Count -gt 0) { Write-Host ''; return ($out -join ',') }
+      for ($i = 0; $i -lt $items.Count; $i++) {
+        $it = $items[$i]
+        $cursor = if ($i -eq $pos) { '>' } else { ' ' }
+        $box    = if ($sel[$it.Key]) { '[x]' } else { '[ ]' }
+        $tag    = if (-not $it.Installed) { '  (not detected on this machine)' } elseif ($it.Registered) { '  (already set up)' } else { '' }
+        $line   = "{0} {1} {2,-16} {3}{4}" -f $cursor, $box, $it.Name, $it.Note, $tag
+        if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
+        $colour = if (-not $it.Installed) { 'DarkGray' } elseif ($i -eq $pos) { 'Cyan' } else { 'Gray' }
+        Write-Host ($line.PadRight($width)) -ForegroundColor $colour
       }
-      default {
-        if ($key.KeyChar -eq 'a' -or $key.KeyChar -eq 'A') {
-          $allOn = -not (@($items | Where-Object { -not $sel[$_.Key] }).Count -gt 0)
-          foreach ($it in $items) { $sel[$it.Key] = -not $allOn }
+      $chosen = @($items | Where-Object { $sel[$_.Key] })
+      $summary = "  selected: " + $(if ($chosen) { ($chosen.Key) -join ', ' } else { 'none yet' })
+      if ($summary.Length -gt $width) { $summary = $summary.Substring(0, $width) }
+      Write-Host ($summary.PadRight($width)) -ForegroundColor DarkGray
+
+      $key = [Console]::ReadKey($true)
+      switch ($key.Key) {
+        'UpArrow'   { $pos = ($pos - 1 + $items.Count) % $items.Count }
+        'DownArrow' { $pos = ($pos + 1) % $items.Count }
+        'Spacebar'  { $sel[$items[$pos].Key] = -not $sel[$items[$pos].Key] }
+        'Enter'     {
+          $out = @($items | Where-Object { $sel[$_.Key] } | ForEach-Object { $_.Key })
+          if ($out.Count -gt 0) { Write-Host ''; return ($out -join ',') }
+        }
+        default {
+          if ($key.KeyChar -eq 'a' -or $key.KeyChar -eq 'A') {
+            $allOn = -not (@($items | Where-Object { -not $sel[$_.Key] }).Count -gt 0)
+            foreach ($it in $items) { $sel[$it.Key] = -not $allOn }
+          }
         }
       }
     }
+  } finally {
+    try { [Console]::CursorVisible = $hadCursor } catch { }
   }
 }
 
