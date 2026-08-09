@@ -21,15 +21,46 @@ $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
 # is a second channel for clients that surface that instead.
 $script:outLines = New-Object System.Collections.Generic.List[string]
 function Add-Out ($line) { $script:outLines.Add([string]$line) }
+
+# A record of the last command and its reply. Clients differ in what they render,
+# so when nothing appears this answers the first question: did the hook run and
+# produce a reply at all, or not run?
+function Write-HookLog ($line) {
+  try {
+    Add-Content -Path (Join-Path $state 'hook.log') -Value ("{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $line)
+  } catch { }
+}
+
 function Send-Out {
   $text = ($script:outLines -join "`n")
+  Write-HookLog ("command '$cmd' replied with $($text.Length) chars")
+  Set-Content -Path (Join-Path $state 'last-reply.txt') -Value $text -ErrorAction SilentlyContinue
+
+  # Getting this text on screen turned out to be the hard part. stderr with exit 2
+  # is documented to show the user and works in a terminal, but the VS Code
+  # extension renders none of it: not stderr, not "reason" from a block decision,
+  # not "systemMessage". Confirmed from the hook log, where the command fires and
+  # replies and the user still sees nothing.
+  #
+  # So the reply is handed to the model as context instead, with an instruction to
+  # print it verbatim. That costs one cheap turn, but the model's reply is the one
+  # channel every client displays, which is the whole point.
+  $instruction = @"
+The user typed the agent-voice command "$cmd". The hook has already carried it out;
+there is nothing for you to run or change. Output the block below exactly as it is,
+inside a code fence, and write nothing else at all: no preamble, no summary, no
+<spoken> block.
+
+$text
+"@
   $payload = [ordered]@{
-    decision       = 'block'
-    reason         = $text
-    systemMessage  = $text
-    suppressOutput = $true
+    hookSpecificOutput = [ordered]@{
+      hookEventName    = 'UserPromptSubmit'
+      additionalContext = $instruction
+    }
+    systemMessage = $text
   }
-  [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 3))
+  [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 4))
   # Also on stderr, for terminals that show that instead of parsing the JSON.
   [Console]::Error.WriteLine($text)
   exit 0
@@ -113,6 +144,7 @@ $spdFlag  = if ($sid) { Join-Path $state "speed.$sid" }
 
 # --- 1. in-session commands ---
 $cmd = ($prompt.Trim().ToLower()) -replace '^[\\/]', ''
+Write-HookLog ("fired: sid='$sid' prompt='" + $cmd.Substring(0, [Math]::Min(40, $cmd.Length)) + "'")
 
 # voice engine: bare shows a numbered list to choose from, since picking a number
 # beats remembering and typing a name. A name still works, and so does 'default'.

@@ -369,15 +369,30 @@ fi
 cmd_out="$(handle_command 2>&1)"
 cmd_rc=$?
 if [ "$cmd_rc" = "2" ]; then
-  printf '%s' "$cmd_out" | node -e '
+  # Getting this text on screen turned out to be the hard part. stderr with exit 2
+  # is documented to show the user and works in a terminal, but the VS Code
+  # extension renders none of it: not stderr, not "reason" from a block decision,
+  # not "systemMessage". Confirmed from the hook log, where the command fires and
+  # replies and the user still sees nothing.
+  #
+  # So the reply is handed to the model as context instead, with an instruction to
+  # print it verbatim. That costs one cheap turn, but the model's reply is the one
+  # channel every client displays, which is the whole point.
+  printf '%s' "$cmd_out" | CMD="$cmd" node -e '
     let s = "";
     process.stdin.on("data", c => s += c).on("end", () => {
       const text = s.replace(/\n+$/, "");
+      const instruction =
+        `The user typed the agent-voice command "${process.env.CMD}". The hook has already carried it out;\n` +
+        "there is nothing for you to run or change. Output the block below exactly as it is,\n" +
+        "inside a code fence, and write nothing else at all: no preamble, no summary, no\n" +
+        "<spoken> block.\n\n" + text;
       process.stdout.write(JSON.stringify({
-        decision: "block",
-        reason: text,
-        systemMessage: text,
-        suppressOutput: true
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: instruction
+        },
+        systemMessage: text
       }) + "\n");
       process.stderr.write(text + "\n");
     });

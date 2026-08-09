@@ -192,8 +192,9 @@ to "sounds basic" rather than going silent.
 ## Daily use
 
 Type these as a normal message in any agent session. They are intercepted by the
-hook, act on that session only, and never reach the model. They work the same in a
-terminal and in the VS Code extension:
+hook and act on that session only. The hook carries the command out and hands its
+reply to the agent to print, so it appears the same way in a terminal and in the VS
+Code extension:
 
 - `voice on`     summary plus spoken audio
 - `voice text`   summary only, no audio
