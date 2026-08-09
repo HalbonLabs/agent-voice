@@ -24,15 +24,93 @@ Copy-Item (Join-Path $src 'lib\*') (Join-Path $target 'lib') -Force
 Write-Host ("Installed scripts to " + $target)
 
 # --- choose agents ---
+# Detect what is actually on this machine, and what is already wired up, so the
+# list offers real choices instead of three names you have to recognise.
+function Get-Agents {
+  $h = $env:USERPROFILE
+  $defs = @(
+    @{ Key='claude'; Name='Claude Code';   Note='fully supported (summary + voice)';                            Dir='.claude';    Cfg='.claude\settings.json' },
+    @{ Key='codex';  Name='Codex CLI';     Note='supported; checked against the docs, not yet run live';        Dir='.codex';     Cfg='.codex\hooks.json' },
+    @{ Key='kimi';   Name='Kimi Code CLI'; Note='summary text only; voice pending upstream support';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' }
+  )
+  foreach ($d in $defs) {
+    $cfgPath = Join-Path $h $d.Cfg
+    $registered = $false
+    if (Test-Path $cfgPath) { $registered = (Get-Content $cfgPath -Raw -ErrorAction SilentlyContinue) -match 'agent-voice' }
+    [pscustomobject]@{
+      Key        = $d.Key
+      Name       = $d.Name
+      Note       = $d.Note
+      Installed  = [bool](Get-Command $d.Key -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $h $d.Dir))
+      Registered = $registered
+    }
+  }
+}
+
+# Arrow-key checklist. Falls back to a typed list when stdin is not a real console
+# (piped input, CI), because ReadKey cannot work there.
+function Select-Agents ($items) {
+  $sel = @{}
+  foreach ($it in $items) { $sel[$it.Key] = $it.Registered -or ($it.Installed -and $it.Key -eq 'claude') }
+
+  if ([Console]::IsInputRedirected) {
+    Write-Host 'Which agents should use agent-voice? (comma-separated)'
+    foreach ($it in $items) {
+      $tag = if (-not $it.Installed) { '  [not detected]' } elseif ($it.Registered) { '  [already set up]' } else { '' }
+      Write-Host ("  {0,-8} {1,-16} {2}{3}" -f $it.Key, $it.Name, $it.Note, $tag)
+    }
+    $typed = Read-Host 'Agents (Enter for claude)'
+    if ([string]::IsNullOrWhiteSpace($typed)) { return 'claude' }
+    return (($typed -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ }) -join ',')
+  }
+
+  Write-Host 'Which agents should use agent-voice?'
+  Write-Host 'Up/Down to move, Space to toggle, A for all, Enter to confirm.' -ForegroundColor DarkGray
+  Write-Host ''
+  $pos = 0
+  $top = [Console]::CursorTop
+  $width = [Math]::Max(60, [Console]::WindowWidth - 1)
+  while ($true) {
+    [Console]::SetCursorPosition(0, $top)
+    for ($i = 0; $i -lt $items.Count; $i++) {
+      $it = $items[$i]
+      $cursor = if ($i -eq $pos) { '>' } else { ' ' }
+      $box    = if ($sel[$it.Key]) { '[x]' } else { '[ ]' }
+      $tag    = if (-not $it.Installed) { '  (not detected on this machine)' } elseif ($it.Registered) { '  (already set up)' } else { '' }
+      $line   = "{0} {1} {2,-16} {3}{4}" -f $cursor, $box, $it.Name, $it.Note, $tag
+      if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
+      $colour = if (-not $it.Installed) { 'DarkGray' } elseif ($i -eq $pos) { 'Cyan' } else { 'Gray' }
+      Write-Host ($line.PadRight($width)) -ForegroundColor $colour
+    }
+    $chosen = @($items | Where-Object { $sel[$_.Key] })
+    Write-Host (("  selected: " + $(if ($chosen) { ($chosen.Key) -join ', ' } else { 'none yet' })).PadRight($width)) -ForegroundColor DarkGray
+
+    $key = [Console]::ReadKey($true)
+    switch ($key.Key) {
+      'UpArrow'   { $pos = ($pos - 1 + $items.Count) % $items.Count }
+      'DownArrow' { $pos = ($pos + 1) % $items.Count }
+      'Spacebar'  { $sel[$items[$pos].Key] = -not $sel[$items[$pos].Key] }
+      'Enter'     {
+        $out = @($items | Where-Object { $sel[$_.Key] } | ForEach-Object { $_.Key })
+        if ($out.Count -gt 0) { Write-Host ''; return ($out -join ',') }
+      }
+      default {
+        if ($key.KeyChar -eq 'a' -or $key.KeyChar -eq 'A') {
+          $allOn = -not (@($items | Where-Object { -not $sel[$_.Key] }).Count -gt 0)
+          foreach ($it in $items) { $sel[$it.Key] = -not $allOn }
+        }
+      }
+    }
+  }
+}
+
 Write-Host ''
-Write-Host 'Which agents should use agent-voice? (comma-separated)'
-Write-Host '  claude   Claude Code       fully supported (summary + voice)'
-Write-Host '  codex    Codex CLI         supported (summary + voice); checked against the docs, not yet run live'
-Write-Host '  kimi     Kimi Code CLI     summary text supported; voice pending upstream support'
-Write-Host ''
-$agents = Read-Host 'Agents (Enter for claude)'
-if ([string]::IsNullOrWhiteSpace($agents)) { $agents = 'claude' }
-$agents = ($agents -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ }) -join ','
+$catalogue = @(Get-Agents)
+if (-not (@($catalogue | Where-Object { $_.Installed }).Count -gt 0)) {
+  Write-Host 'None of the supported agents were detected, so all are listed.' -ForegroundColor Yellow
+}
+$agents = Select-Agents $catalogue
+Write-Host ("Agents: " + $agents) -ForegroundColor Green
 
 # Does the `python` the hooks will actually call work? Guards against the Windows
 # Store stub, which sits on PATH and looks like an interpreter but is not one.

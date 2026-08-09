@@ -98,6 +98,13 @@ cd agent-voice
 bash install.sh
 ```
 
+The installer detects which supported agents are actually on your machine and
+offers them as a checklist: Up/Down to move, Space to toggle, `A` for all, Enter
+to confirm. Anything already wired up is pre-ticked and marked, and anything not
+found is greyed out and labelled, so you can still pick it if you are about to
+install it. When stdin is not a real terminal (piped input, CI) it falls back to
+the older comma-separated prompt.
+
 Re-running the installer later is safe: it strips its own previous hook entries
 before adding them again, so nothing is ever duplicated. Use it to add another
 agent or change engine.

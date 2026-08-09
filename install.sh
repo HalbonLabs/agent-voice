@@ -24,16 +24,101 @@ cp -f "$SRC/lib/"* "$TARGET/lib/"
 chmod +x "$TARGET"/*.sh
 echo "Installed scripts to $TARGET"
 
-# Choose agents.
+# Choose agents. Detect what is actually on this machine, and what is already
+# wired up, so the list offers real choices instead of three names to recognise.
+KEYS="claude codex kimi"
+name_of()      { case "$1" in claude) echo "Claude Code";; codex) echo "Codex CLI";; kimi) echo "Kimi Code CLI";; esac; }
+note_of()      { case "$1" in
+                   claude) echo "fully supported (summary + voice)";;
+                   codex)  echo "supported; checked against the docs, not yet run live";;
+                   kimi)   echo "summary text only; voice pending upstream support";;
+                 esac; }
+dir_of()       { case "$1" in claude) echo "$HOME/.claude";; codex) echo "$HOME/.codex";; kimi) echo "$HOME/.kimi-code";; esac; }
+cfg_of()       { case "$1" in
+                   claude) echo "$HOME/.claude/settings.json";;
+                   codex)  echo "$HOME/.codex/hooks.json";;
+                   kimi)   echo "$HOME/.kimi-code/config.toml";;
+                 esac; }
+is_installed()  { command -v "$1" >/dev/null 2>&1 || [ -d "$(dir_of "$1")" ]; }
+is_registered() { [ -f "$(cfg_of "$1")" ] && grep -q 'agent-voice' "$(cfg_of "$1")" 2>/dev/null; }
+
+# Pre-tick anything already set up, plus Claude when it is present.
+sel_claude=0; sel_codex=0; sel_kimi=0
+for k in $KEYS; do
+  if is_registered "$k" || { [ "$k" = "claude" ] && is_installed "$k"; }; then eval "sel_$k=1"; fi
+done
+get_sel() { eval "echo \$sel_$1"; }
+selected_csv() { out=""; for k in $KEYS; do [ "$(get_sel "$k")" = "1" ] && out="${out:+$out,}$k"; done; printf '%s' "$out"; }
+
+any_installed=0
+for k in $KEYS; do is_installed "$k" && any_installed=1; done
 echo ""
-echo "Which agents should use agent-voice? (comma-separated)"
-echo "  claude   Claude Code       fully supported (summary + voice)"
-echo "  codex    Codex CLI         supported (summary + voice); checked against the docs, not yet run live"
-echo "  kimi     Kimi Code CLI     summary text supported; voice pending upstream support"
-echo ""
-printf "Agents (Enter for claude): "
-read -r agents
-[ -z "$agents" ] && agents="claude"
+[ "$any_installed" = 0 ] && echo "None of the supported agents were detected, so all are listed."
+
+if [ ! -t 0 ]; then
+  # Not a real terminal (piped input, CI): ReadKey-style UI cannot work.
+  echo "Which agents should use agent-voice? (comma-separated)"
+  for k in $KEYS; do
+    tag=""
+    is_installed "$k" || tag="  [not detected]"
+    is_registered "$k" && tag="  [already set up]"
+    printf '  %-8s %-16s %s%s\n' "$k" "$(name_of "$k")" "$(note_of "$k")" "$tag"
+  done
+  printf "Agents (Enter for claude): "
+  read -r agents
+  [ -z "$agents" ] && agents="claude"
+else
+  echo "Which agents should use agent-voice?"
+  echo "Up/Down to move, Space to toggle, A for all, Enter to confirm."
+  echo ""
+  pos=0; count=0
+  for k in $KEYS; do count=$((count + 1)); done
+  first_draw=1
+  while :; do
+    [ "$first_draw" = 1 ] || printf '\033[%dA' "$((count + 1))"
+    first_draw=0
+    i=0
+    for k in $KEYS; do
+      if [ "$i" = "$pos" ]; then cur=">"; else cur=" "; fi
+      if [ "$(get_sel "$k")" = "1" ]; then box="[x]"; else box="[ ]"; fi
+      tag=""
+      is_installed "$k" || tag="  (not detected on this machine)"
+      is_registered "$k" && tag="  (already set up)"
+      printf '\033[K%s %s %-16s %s%s\n' "$cur" "$box" "$(name_of "$k")" "$(note_of "$k")" "$tag"
+      i=$((i + 1))
+    done
+    csv="$(selected_csv)"
+    printf '\033[K  selected: %s\n' "${csv:-none yet}"
+
+    IFS= read -rsn1 ch
+    if [ "$ch" = "$(printf '\033')" ]; then
+      IFS= read -rsn2 -t 0.1 rest
+      case "$rest" in
+        '[A') pos=$(((pos - 1 + count) % count)) ;;
+        '[B') pos=$(((pos + 1) % count)) ;;
+      esac
+      continue
+    fi
+    case "$ch" in
+      ' ')
+        i=0
+        for k in $KEYS; do
+          if [ "$i" = "$pos" ]; then
+            if [ "$(get_sel "$k")" = "1" ]; then eval "sel_$k=0"; else eval "sel_$k=1"; fi
+          fi
+          i=$((i + 1))
+        done ;;
+      a|A)
+        allon=1
+        for k in $KEYS; do [ "$(get_sel "$k")" = "1" ] || allon=0; done
+        for k in $KEYS; do if [ "$allon" = "1" ]; then eval "sel_$k=0"; else eval "sel_$k=1"; fi; done ;;
+      '')
+        agents="$(selected_csv)"
+        if [ -n "$agents" ]; then echo ""; break; fi ;;
+    esac
+  done
+fi
+echo "Agents: $agents"
 
 # Does the python3 the hooks will actually call work?
 have_python() {
