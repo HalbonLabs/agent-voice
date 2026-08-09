@@ -33,7 +33,15 @@ You choose per session whether you want the audio, just the text, or nothing.
 | Codex CLI      | `~/.codex/hooks.json`           | Yes          | Yes          |
 | Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Yes (via transcript) |
 
-Claude Code is fully built and tested end to end.
+**Platform status, so nothing is a surprise.** All three agents have been tested
+end to end **on Windows**. The macOS scripts are written and reviewed and share the
+same Node helpers and the same voice catalogue, but have **not yet been run on an
+actual Mac**. The one part known to be unproven even in principle is `voice pick`
+on macOS, which opens Terminal via `osascript`; the in-session `voice preview`
+needs no window and should be fine. If you are on a Mac you are the first, so
+please report anything that misbehaves rather than working around it.
+
+Claude Code is the most exercised of the three, and was built against it first.
 
 Codex is supported and its contract has been checked against the
 [Codex hooks reference](https://doc.jarvisuni.com/openai/codex/hooks.html), which
@@ -67,7 +75,7 @@ sessions fall silent again rather than misbehaving.
 
 ## How it works
 
-agent-voice is two hooks per agent (no app, no background service):
+agent-voice is two hooks per agent, and no application:
 
 - A **UserPromptSubmit** hook injects a short instruction each turn asking the
   agent to end its reply with a `<spoken>` summary block.
@@ -78,8 +86,14 @@ All supported agents pass a JSON payload to hooks on stdin, so the same core
 scripts serve every agent. Only the config file where the hooks are registered
 differs, and the installer handles that per agent.
 
+The one exception to "no background process" is Kokoro, which keeps a warm model
+resident so replies do not wait ten seconds to start speaking. It shuts itself down
+after 15 idle minutes and is described under
+[Choosing a voice engine](#choosing-a-voice-engine). Every other engine runs only
+while a reply is being spoken.
+
 State is per session, keyed on the session id, so you can have one window talking
-and others silent.
+and others silent, on different engines and at different speeds.
 
 ## Install
 
@@ -110,18 +124,17 @@ found is greyed out and labelled, so you can still pick it if you are about to
 install it. When stdin is not a real terminal (piped input, CI) it falls back to
 the older comma-separated prompt.
 
+It then asks which voice engine to use, wires the hooks into each agent's config
+without touching anything else already there, and on Windows adds a global stop
+hotkey. Reload any open agent session afterwards so it picks up the hooks.
+
 Re-running the installer later is safe: it strips its own previous hook entries
 before adding them again, so nothing is ever duplicated. Use it to add another
-agent or change engine.
-
-The installer asks which agents to enable, which voice engine to use, wires the
-hooks into each agent's config without touching anything else already there, and
-(on Windows) adds a global stop hotkey. Reload any open agent session afterwards
-so it picks up the hooks.
+agent, change engine, or audition voices again.
 
 ## Choosing a voice engine
 
-The installer offers three, with a description of each:
+The installer offers four, with a description of each:
 
 | Engine            | Quality   | Cost          | Privacy                                | Needs   |
 | ----------------- | --------- | ------------- | -------------------------------------- | ------- |
@@ -238,21 +251,36 @@ Tip: do not run voice in two sessions at once unless you want both talking. Use
 
 ## Changing the voice
 
-Edit `~/.agent-voice/config`:
+Usually you do not need to touch a file. In any session:
 
-- edge-tts: set `edge_voice`, for example `en-GB-SoniaNeural` (British female) or
-  `en-US-AvaNeural`. List voices with `python -m edge_tts --list-voices`.
-- ElevenLabs: set `eleven_voice` to a voice id. Free accounts can use only the
-  built-in premade voices via the API; paid accounts unlock the premium library.
-- Kokoro: easiest is to re-run the installer, which lists all 54 voices with their
-  published quality grades and lets you **hear each one before choosing** (Up/Down
-  to move, `P` to play a sample, Enter to pick). Or set `kokoro_voice` by hand, for
-  example `bf_emma` (British female, the default and the best-graded British voice
-  at B-), `bm_george` (British male, C) or `af_heart` (American female, A), plus
-  `kokoro_speed` (1.0 is normal, default 1.15). Grades vary a lot, so it is worth
-  listening rather than guessing. Full list:
-  [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md).
-- Native (macOS): set `native_voice` to an installed voice name.
+- `voice model` lists what the current engine offers and `voice model 9` switches.
+- `voice preview 9` plays one first, so you can audition before committing.
+- `voice pick` opens the full picker with arrow keys and `P` to listen.
+
+Those are per session. To change the machine-wide default, either re-run the
+installer, which walks you through the same picker, or edit `~/.agent-voice/config`
+by hand:
+
+| Key | Applies to | Example |
+| --- | ---------- | ------- |
+| `engine` | all | `kokoro` |
+| `kokoro_voice`, `kokoro_speed` | Kokoro | `af_heart`, `1.15` |
+| `edge_voice`, `edge_rate` | edge-tts | `en-GB-SoniaNeural`, `+15%` |
+| `eleven_voice`, `eleven_model` | ElevenLabs | a voice id from your account |
+| `native_voice` | Native, macOS | an installed system voice |
+| `voice_speed` | all | `1.25`, overrides the per-engine speed |
+| `python_cmd` | edge-tts, Kokoro | the interpreter the hooks should use |
+
+`python_cmd` is written by the installer and is worth leaving alone. It pins the
+exact interpreter that has the dependencies, because the hooks inherit the PATH of
+whichever agent launched them, and a project virtualenv earlier on that PATH would
+otherwise be picked and silently fail to the robotic voice.
+
+Kokoro's grades vary a lot, so listen rather than guess: `bf_emma` is the best
+British voice at B-, every British male tops out at C, and the highest graded
+overall is `af_heart` at A. Full list:
+[VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md). For
+edge-tts, `python -m edge_tts --list-voices` prints the hundreds it supports.
 
 ## Uninstall
 
@@ -267,13 +295,21 @@ and offers to delete `~/.agent-voice`. Reload open sessions afterwards.
 Everything installs to `~/.agent-voice`:
 
 - `voice-context.*` and `speak.*`   the two hook scripts
-- `config`                          your engine and voice choices
+- `config`                          your engine, voice, speed and interpreter
 - `elevenlabs-key`                  your key, if you chose ElevenLabs (local only)
 - `kokoro-tts.py`                   local synthesiser (Kokoro engine only)
 - `kokoro_serve.py`                 warm daemon that keeps the model loaded
 - `kokoro_engine.py`                the synthesis itself, shared by those two
-- `lib/*.mjs`                       small Node helpers (JSON parsing, config merge)
+- `pick-voice.*`                    the arrow-key voice picker, shared with the installer
+- `shush.*`, `voice.*`              stop speech, and the global on/off toggle
+- `lib/*.mjs`                       small Node helpers (payload parsing, hook registration)
+- `lib/kokoro-voices.json`          the 54 voices and their grades, shared with the installer
 - `state/`                          per-session flags and temp audio
+
+Two files are deliberately shared between the installer and the running hooks
+rather than duplicated: `pick-voice.*`, so the picker you get from `voice pick` is
+the same one the installer uses, and `lib/kokoro-voices.json`, so the voice ids and
+grades cannot drift between what you can install and what you can switch to.
 
 Registration is idempotent: any existing hook entry that references `agent-voice`
 is removed before the current one is added, so re-installing, upgrading, or adding
