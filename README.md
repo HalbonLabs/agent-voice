@@ -55,12 +55,25 @@ defects were found and corrected, all of which made the installer fail or mislea
   written, so it fell back to a Python with no Kokoro in it and each preview
   failed its size check without saying anything.
 
-*Still unverified on macOS,* and both touch the OS in ways code review cannot
-settle: the **Stop agent-voice** Quick Action the installer builds in
-`~/Library/Services`, and `voice pick`, which opens Terminal via `osascript` and
-will trigger an Automation permission prompt the first time. Both have setup-free
-fallbacks that work regardless (`voice stop` and `voice preview`), so neither can
-leave you stuck. Codex and Kimi have not been exercised on macOS at all.
+*Verified on macOS on 2026-08-10,* after those fixes, by installing on a real Mac
+(macOS 25.5, Apple silicon, Python 3.12.13) and checking each claim rather than
+trusting the installer's own output:
+
+- Kokoro installs into the venv, the weights and spaCy model download, and the
+  warm-up probe synthesises. A real synthesis produced a 174KB WAV that plays.
+- Both hooks register into `~/.claude/settings.json` (`Stop` and
+  `UserPromptSubmit`).
+- The **Stop agent-voice** Quick Action is not merely written to
+  `~/Library/Services` — it is registered with the Services system, confirmed in
+  `pbs -dump`. Binding the hotkey is still a manual two-click step.
+- `voice stop` stops speech and exits clean.
+
+*Still unverified on macOS.* `voice pick`, which opens Terminal via `osascript`
+and will trigger an Automation permission prompt the first time — note it targets
+Terminal.app specifically, so iTerm2 and Ghostty users will see Terminal launch.
+`voice preview` is the setup-free fallback and works regardless. The other three
+engines (edge-tts, ElevenLabs, Native) have not been run on macOS, and Codex and
+Kimi have not been exercised on macOS at all.
 
 If you hit something on a Mac, please report it rather than working around it.
 
