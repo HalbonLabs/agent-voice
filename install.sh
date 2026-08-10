@@ -155,16 +155,20 @@ echo "Agents: $agents"
 # interpreter to record in config.
 VENV="$TARGET/venv"
 
-# Kokoro's window is bounded at BOTH ends, and both bounds are load-bearing:
+# Kokoro's window is bounded at BOTH ends, by its own package metadata:
+# every current release (0.8.1 through 0.9.4) declares
 #
-#   floor 3.10   spacy 3.8.x needs thinc >= 8.3.12, which requires Python >= 3.10.
-#   ceiling 3.12 kokoro pins numpy==1.26.4 exactly, and numpy 1.26.4 publishes no
-#                wheels above cp312. On 3.13+ pip falls back to source builds of
-#                the spacy/blis stack and they fail.
+#     Requires-Python >=3.10,<3.13
 #
-# A floor alone is not enough — checked against PyPI metadata on 2026-08-10, an
-# install on 3.13 fails just as surely as one on 3.9, only later and more
-# confusingly. edge-tts is pure Python and has no ceiling.
+# so 3.10, 3.11 and 3.12 are the whole supported set. Verified on 2026-08-10 by
+# installing successfully on 3.12 and watching 3.9 and 3.13 both fail.
+#
+# The 3.13 failure is worth knowing because it does not look like a version
+# problem. pip ignores every modern kokoro (all excluded by that constraint),
+# backtracks to ancient 0.7.x releases, and those pin numpy==1.26.4, which has no
+# wheels above cp312 — so it dies part-way through a source build of the
+# spacy/blis stack with no mention of Python versions at all. A floor-only check
+# lets that through. edge-tts is pure Python and has no ceiling.
 PY_MIN_EDGE="3.9";    PY_MAX_EDGE=""
 PY_MIN_KOKORO="3.10"; PY_MAX_KOKORO="3.12"
 

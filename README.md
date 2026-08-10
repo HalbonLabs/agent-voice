@@ -42,9 +42,10 @@ and is described precisely below rather than as one word, because "supported" an
 defects were found and corrected, all of which made the installer fail or mislead:
 
 - **Kokoro could never install on a stock Mac.** The installer accepted any
-  Python 3, so it used the system `/usr/bin/python3` (3.9), which is below the
-  spacy stack's floor. It now resolves an interpreter inside Kokoro's real
-  3.10-3.12 window and says which range it needs when it cannot find one.
+  Python 3, so it used the system `/usr/bin/python3` (3.9), which is below
+  Kokoro's floor. It now resolves an interpreter inside Kokoro's real 3.10-3.12
+  window and names that range when it cannot find one. Verified by a successful
+  install on 3.12, and by 3.9 and 3.13 both failing.
 - **Dependencies went to the wrong place.** `pip install --user` is refused
   outright by Homebrew's Pythons, which are PEP 668 externally managed, so
   choosing a newer Python simply swapped one failure for another. They now go
@@ -129,11 +130,17 @@ needed only if you want edge-tts or Kokoro, and the two want different things:
 | ElevenLabs, Native | none | Nothing to install |
 
 Kokoro's ceiling is real and catches people out, because the usual instinct on a
-version error is to install the newest Python. It depends on spacy, whose `thinc`
-needs Python 3.10 or newer, and it pins `numpy==1.26.4` exactly, and that numpy
-publishes no wheels above 3.12. On 3.13 or 3.14 pip falls back to building the
-spacy stack from source and it fails. So newer is not better here: **3.12 is the
-sweet spot**, and on macOS `brew install python@3.12` is the one-line fix.
+version error is to install the newest Python. The bound is Kokoro's own: every
+current release declares `Requires-Python >=3.10,<3.13`, so 3.10, 3.11 and 3.12
+are the entire supported set. On macOS `brew install python@3.12` is the one-line
+fix.
+
+The failure on 3.13 is worth recognising, because it does not look like a version
+problem. pip excludes every modern Kokoro, backtracks to ancient 0.7.x releases
+that pin `numpy==1.26.4`, and that numpy has no wheels above 3.12 — so the install
+dies part-way through building the spacy stack from source, without ever
+mentioning Python versions. If you see a `blis` or `thinc` build failure, the real
+cause is that your Python is too new.
 
 The installer checks the version, not merely that some Python exists, and names
 the range in the error rather than leaving you to guess. On macOS and Linux it
