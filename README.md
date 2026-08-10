@@ -54,6 +54,10 @@ defects were found and corrected, all of which made the installer fail or mislea
   interpreter when the file was sourced, which happens before the config is
   written, so it fell back to a Python with no Kokoro in it and each preview
   failed its size check without saying anything.
+- **Every `voice ...` command printed its reply twice.** The reply went out on
+  two user-visible channels at once — `systemMessage`, which the client renders
+  itself, and `additionalContext`, which asks the model to print the same block.
+  Both render in a terminal. One channel now.
 
 *Verified on macOS on 2026-08-10,* after those fixes, by installing on a real Mac
 (macOS 25.5, Apple silicon, Python 3.12.13) and checking each claim rather than
@@ -67,13 +71,20 @@ trusting the installer's own output:
   `~/Library/Services` — it is registered with the Services system, confirmed in
   `pbs -dump`. Binding the hotkey is still a manual two-click step.
 - `voice stop` stops speech and exits clean.
+- The command surface works in a live session: `voice status`, `voice help`,
+  `voice list`, `voice model N`, `voice on`. The per-session voice override
+  applies, and a reply was spoken aloud in the switched-to voice.
+- One Kokoro daemon serves every session and every voice, so a second or reloaded
+  session starts speaking in ~1.7s. The slow ~12s path is only a cold start,
+  after 15 idle minutes or a reboot.
 
 *Still unverified on macOS.* `voice pick`, which opens Terminal via `osascript`
 and will trigger an Automation permission prompt the first time — note it targets
 Terminal.app specifically, so iTerm2 and Ghostty users will see Terminal launch.
 `voice preview` is the setup-free fallback and works regardless. The other three
-engines (edge-tts, ElevenLabs, Native) have not been run on macOS, and Codex and
-Kimi have not been exercised on macOS at all.
+engines (edge-tts, ElevenLabs, Native) have not been run on macOS, `uninstall.sh`
+has not been run against a real install, and Codex and Kimi have not been
+exercised on macOS at all.
 
 If you hit something on a Mac, please report it rather than working around it.
 
