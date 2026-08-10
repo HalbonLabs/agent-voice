@@ -34,14 +34,34 @@ You choose per session whether you want the audio, just the text, or nothing.
 | Kimi Code CLI  | `~/.kimi-code/config.toml`      | Yes          | Yes (via transcript) |
 
 **Platform status, so nothing is a surprise.** All three agents have been tested
-end to end **on Windows**. The macOS scripts are written and reviewed and share the
-same Node helpers and the same voice catalogue, but have **not yet been run on an
-actual Mac**. Two macOS parts touch the OS and are therefore the least certain: the
-**Stop agent-voice** Quick Action the installer builds, and `voice pick`, which
-opens Terminal via `osascript`. Both have setup-free fallbacks that work regardless
-(`voice stop` and `voice preview`), so neither can leave you stuck. If you are on a
-Mac you are the first, so please report anything that misbehaves rather than
-working around it.
+end to end **on Windows**, which is where agent-voice was built. macOS is younger
+and is described precisely below rather than as one word, because "supported" and
+"unsupported" are both wrong.
+
+*Fixed on macOS on 2026-08-10, after a real install attempt on a Mac.* Three
+defects were found and corrected, all of which made the installer fail or mislead:
+
+- **Kokoro could never install on a stock Mac.** The installer accepted any
+  Python 3, so it used the system `/usr/bin/python3` (3.9), which is below the
+  spacy stack's floor. It now resolves an interpreter inside Kokoro's real
+  3.10-3.12 window and says which range it needs when it cannot find one.
+- **Dependencies went to the wrong place.** `pip install --user` is refused
+  outright by Homebrew's Pythons, which are PEP 668 externally managed, so
+  choosing a newer Python simply swapped one failure for another. They now go
+  into a private `~/.agent-voice/venv`.
+- **Every voice preview in the installer was silent.** The picker resolved its
+  interpreter when the file was sourced, which happens before the config is
+  written, so it fell back to a Python with no Kokoro in it and each preview
+  failed its size check without saying anything.
+
+*Still unverified on macOS,* and both touch the OS in ways code review cannot
+settle: the **Stop agent-voice** Quick Action the installer builds in
+`~/Library/Services`, and `voice pick`, which opens Terminal via `osascript` and
+will trigger an Automation permission prompt the first time. Both have setup-free
+fallbacks that work regardless (`voice stop` and `voice preview`), so neither can
+leave you stuck. Codex and Kimi have not been exercised on macOS at all.
+
+If you hit something on a Mac, please report it rather than working around it.
 
 Claude Code is the most exercised of the three, and was built against it first.
 
@@ -99,9 +119,27 @@ and others silent, on different engines and at different speeds.
 
 ## Install
 
-You need the agent(s) already installed, which is where Node comes from. Python 3
-is needed only if you want edge-tts or Kokoro; the installer checks for it and
-says so plainly if it is missing, rather than leaving you with a broken choice.
+You need the agent(s) already installed, which is where Node comes from. Python is
+needed only if you want edge-tts or Kokoro, and the two want different things:
+
+| Engine | Python | Why |
+| ------ | ------ | --- |
+| edge-tts | 3.9 or newer | Pure Python, no compiled dependencies |
+| Kokoro | **3.10 to 3.12** | Bounded at both ends, see below |
+| ElevenLabs, Native | none | Nothing to install |
+
+Kokoro's ceiling is real and catches people out, because the usual instinct on a
+version error is to install the newest Python. It depends on spacy, whose `thinc`
+needs Python 3.10 or newer, and it pins `numpy==1.26.4` exactly, and that numpy
+publishes no wheels above 3.12. On 3.13 or 3.14 pip falls back to building the
+spacy stack from source and it fails. So newer is not better here: **3.12 is the
+sweet spot**, and on macOS `brew install python@3.12` is the one-line fix.
+
+The installer checks the version, not merely that some Python exists, and names
+the range in the error rather than leaving you to guess. On macOS and Linux it
+installs the dependencies into a private environment at `~/.agent-voice/venv`
+rather than with `pip --user`, which keeps them off your system Python and avoids
+the "externally managed environment" refusal from Homebrew's Pythons.
 
 **Windows** (PowerShell):
 
@@ -293,7 +331,9 @@ by hand:
 `python_cmd` is written by the installer and is worth leaving alone. It pins the
 exact interpreter that has the dependencies, because the hooks inherit the PATH of
 whichever agent launched them, and a project virtualenv earlier on that PATH would
-otherwise be picked and silently fail to the robotic voice.
+otherwise be picked and silently fail to the robotic voice. On macOS and Linux it
+points into `~/.agent-voice/venv`, the private environment the installer builds;
+deleting that directory is what "reinstall the engine" means.
 
 Kokoro's grades vary a lot, so listen rather than guess: `bf_emma` is the best
 British voice at B-, every British male tops out at C, and the highest graded

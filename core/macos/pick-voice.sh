@@ -15,8 +15,18 @@ TARGET="$ROOT"
 STATE="$ROOT/state"
 
 cfg_read() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ROOT/config" 2>/dev/null | tail -1; }
-pick_py="$(cfg_read python_cmd)"; [ -z "$pick_py" ] && pick_py="$(cfg_read kokoro_python)"
-[ -z "$pick_py" ] && pick_py="python3"
+
+# Resolved at USE time, not at source time. install.sh sources this file before it
+# writes the config, so a file-scope read here returned empty and fell back to bare
+# python3 — which on a Mac is the system 3.9 that has no kokoro in it. Every preview
+# in the installer then failed the >500 byte check and played nothing, silently.
+# $PICK_PY lets install.sh hand in the interpreter it just built the venv around.
+resolve_pick_py() {
+  if [ -n "${PICK_PY:-}" ]; then printf '%s' "$PICK_PY"; return 0; fi
+  p="$(cfg_read python_cmd)"; [ -z "$p" ] && p="$(cfg_read kokoro_python)"
+  [ -z "$p" ] && p="python3"
+  printf '%s' "$p"
+}
 
 # Speak a sample in one voice. Cheap once the daemon is warm, which is why voice
 # selection happens after the model has been pre-loaded.
@@ -24,7 +34,7 @@ preview_voice() {
   pv_wav="$STATE/preview.wav"
   rm -f "$pv_wav"
   printf 'This is how I will read your summaries back to you.' \
-    | "${pick_py:-python3}" "$TARGET/kokoro-tts.py" "$pv_wav" "$1" 1.15 >/dev/null 2>&1
+    | "$(resolve_pick_py)" "$TARGET/kokoro-tts.py" "$pv_wav" "$1" 1.15 >/dev/null 2>&1
   if [ -s "$pv_wav" ] && [ "$(wc -c < "$pv_wav")" -gt 500 ]; then
     afplay "$pv_wav" >/dev/null 2>&1
     rm -f "$pv_wav"

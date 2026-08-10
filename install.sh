@@ -39,10 +39,29 @@ cfg_of()       { case "$1" in
                    codex)  echo "$HOME/.codex/hooks.json";;
                    kimi)   echo "$HOME/.kimi-code/config.toml";;
                  esac; }
-is_installed()  { command -v "$1" >/dev/null 2>&1 || [ -d "$(dir_of "$1")" ]; }
+# Installed means the command is runnable, nothing weaker. The config directory
+# is NOT evidence: hooks only ever fire from inside a running agent, so an agent
+# whose binary is absent cannot use agent-voice no matter what it left on disk.
+# This used to be `command -v ... || [ -d "$(dir_of ...)" ]`, which reported
+# Codex and Kimi as installed on any machine carrying a stale (or foreign) ~/.codex
+# or ~/.kimi-code, and so offered them untagged in the checklist.
+is_installed()  { command -v "$1" >/dev/null 2>&1; }
+# Configured-but-absent is still worth SAYING — it usually means the agent was
+# installed once, or lives somewhere off PATH — so it gets its own tag rather
+# than being silently folded into "installed" or into "not detected".
+has_config()    { [ -d "$(dir_of "$1")" ]; }
 is_registered() { [ -f "$(cfg_of "$1")" ] && grep -q 'agent-voice' "$(cfg_of "$1")" 2>/dev/null; }
 
-# Pre-tick anything already set up, plus Claude when it is present.
+# One place decides the label, so the piped and interactive lists cannot drift.
+status_tag_of() {
+  if is_registered "$1"; then printf 'already set up'
+  elif is_installed "$1"; then printf ''
+  elif has_config "$1"; then printf 'config found, but not on PATH'
+  else printf 'not detected on this machine'
+  fi
+}
+
+# Pre-tick anything already set up, plus Claude when it is genuinely present.
 sel_claude=0; sel_codex=0; sel_kimi=0
 for k in $KEYS; do
   if is_registered "$k" || { [ "$k" = "claude" ] && is_installed "$k"; }; then eval "sel_$k=1"; fi
@@ -59,9 +78,7 @@ if [ ! -t 0 ]; then
   # Not a real terminal (piped input, CI): ReadKey-style UI cannot work.
   echo "Which agents should use agent-voice? (comma-separated)"
   for k in $KEYS; do
-    tag=""
-    is_installed "$k" || tag="  [not detected]"
-    is_registered "$k" && tag="  [already set up]"
+    t="$(status_tag_of "$k")"; tag=""; [ -n "$t" ] && tag="  [$t]"
     printf '  %-8s %-16s %s%s\n' "$k" "$(name_of "$k")" "$(note_of "$k")" "$tag"
   done
   printf "Agents (Enter for claude): "
@@ -81,9 +98,7 @@ else
     for k in $KEYS; do
       if [ "$i" = "$pos" ]; then cur=">"; else cur=" "; fi
       if [ "$(get_sel "$k")" = "1" ]; then box="[x]"; else box="[ ]"; fi
-      tag=""
-      is_installed "$k" || tag="  (not detected on this machine)"
-      is_registered "$k" && tag="  (already set up)"
+      t="$(status_tag_of "$k")"; tag=""; [ -n "$t" ] && tag="  ($t)"
       printf '\033[K%s %s %-16s %s%s\n' "$cur" "$box" "$(name_of "$k")" "$(note_of "$k")" "$tag"
       i=$((i + 1))
     done
@@ -120,18 +135,75 @@ else
 fi
 echo "Agents: $agents"
 
-# Does the python3 the hooks will actually call work?
-have_python() {
-  python3 -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1
+# --- Python resolution -------------------------------------------------------
+#
+# Two things went wrong here before, and they compound, so both are fixed together.
+#
+# 1. VERSION. The old check asked only "is this Python 3", which any 3.x passes.
+#    On a stock Mac bare `python3` is /usr/bin/python3 = 3.9, and Kokoro pulls
+#    spacy, which needs thinc >= 8.3.12, which needs Python >= 3.10. So pip
+#    correctly reported "No matching distribution found for thinc" and the whole
+#    install died. Kokoro was never installable on a default macOS.
+#
+# 2. PEP 668. Simply pointing at a newer interpreter trades that error for a
+#    different one: Homebrew's pythons ship an EXTERNALLY-MANAGED marker, so
+#    `pip install --user` refuses outright. The one interpreter that ACCEPTS
+#    --user on a stock Mac is the 3.9 that is too old to use.
+#
+# A private venv resolves both: it is never externally managed, it cannot be
+# broken by the user's other Python work, and it gives the hooks one unambiguous
+# interpreter to record in config.
+VENV="$TARGET/venv"
+
+# Kokoro's window is bounded at BOTH ends, and both bounds are load-bearing:
+#
+#   floor 3.10   spacy 3.8.x needs thinc >= 8.3.12, which requires Python >= 3.10.
+#   ceiling 3.12 kokoro pins numpy==1.26.4 exactly, and numpy 1.26.4 publishes no
+#                wheels above cp312. On 3.13+ pip falls back to source builds of
+#                the spacy/blis stack and they fail.
+#
+# A floor alone is not enough — checked against PyPI metadata on 2026-08-10, an
+# install on 3.13 fails just as surely as one on 3.9, only later and more
+# confusingly. edge-tts is pure Python and has no ceiling.
+PY_MIN_EDGE="3.9";    PY_MAX_EDGE=""
+PY_MIN_KOKORO="3.10"; PY_MAX_KOKORO="3.12"
+
+# First interpreter within [$1, $2]. $2 empty means no upper bound. Candidates are
+# swept newest-first WITHIN the window, so a machine carrying both 3.12 and 3.11
+# gets 3.12, and one carrying only 3.13 correctly reports nothing usable rather
+# than handing back an interpreter that will fail during pip.
+find_python() {
+  want_maj="${1%%.*}"; want_min="${1##*.}"
+  if [ -n "${2:-}" ]; then max_maj="${2%%.*}"; max_min="${2##*.}"; else max_maj=99; max_min=99; fi
+  for c in python3.13 python3.12 python3.11 python3.10 \
+           python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    p="$(command -v "$c" 2>/dev/null)" || continue
+    [ -n "$p" ] && [ -x "$p" ] || continue
+    if "$p" -c "import sys; sys.exit(0 if ($want_maj, $want_min) <= sys.version_info[:2] <= ($max_maj, $max_min) else 1)" >/dev/null 2>&1; then
+      printf '%s' "$p"; return 0
+    fi
+  done
+  return 1
 }
 
-# Record the full path of the interpreter we just verified, rather than leaving the
-# hooks to resolve bare python3 later. They run with whatever PATH the agent that
-# launched them has, which may put a project venv first, and a venv without the
-# dependencies means a silent drop to the robotic voice.
-python_path() {
-  p="$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null)"
-  if [ -n "$p" ] && [ -x "$p" ]; then printf '%s' "$p"; else printf 'python3'; fi
+# Create (or reuse) the private environment and print its interpreter.
+# Prints nothing and returns non-zero if it cannot be built, so every caller
+# must branch rather than silently carrying on with a broken path.
+ensure_venv() {
+  base="$1"
+  if [ ! -x "$VENV/bin/python" ]; then
+    echo "Creating a private Python environment in $VENV ..." >&2
+    "$base" -m venv "$VENV" >/dev/null 2>&1 || return 1
+  fi
+  [ -x "$VENV/bin/python" ] || return 1
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+  printf '%s' "$VENV/bin/python"
+}
+
+# Resolve an interpreter within [$1, $2] and return a venv built on it.
+python_for() {
+  base="$(find_python "$1" "${2:-}")" || return 1
+  ensure_venv "$base" || return 1
 }
 
 # macOS has no scriptable global-hotkey API, so a shortcut cannot simply be
@@ -256,15 +328,48 @@ WFLOW
 # Shared message for the two engines that need Python. Falling back to native is
 # stated out loud rather than done quietly, so nobody ends up wondering why the
 # voice sounds robotic.
+# $1 = engine, $2 = minimum, $3 = maximum ("" for none). Naming the actual window
+# is the point: the old wording said only "Python 3 was not found on PATH", which
+# is actively misleading on a Mac that HAS python3 and simply has the wrong one.
+# It is equally misleading to say "or newer" for an engine with a ceiling — that
+# is what sends someone to install 3.14 and hit a stranger failure.
 deny_python_engine() {
   echo ""
-  echo "Python 3 was not found on PATH, and $1 needs it."
-  if [ "$(uname)" = "Darwin" ]; then
-    echo "  Install it with:  brew install python3     (or from https://www.python.org/downloads/)"
+  if [ -n "${3:-}" ]; then
+    echo "$1 needs Python between $2 and $3, and no interpreter in that range was found."
   else
-    echo "  Install it with:  sudo apt-get install python3 python3-pip"
+    echo "$1 needs Python $2 or newer, and no interpreter that new was found."
+  fi
+  if [ "$(uname)" = "Darwin" ]; then
+    echo "  macOS ships Python 3.9 at /usr/bin/python3, which is below the floor."
+    if [ -n "${3:-}" ]; then
+      echo "  Newer is not automatically better here: $1 pins dependencies that publish"
+      echo "  no wheels above $3, so 3.13 and 3.14 fail too."
+      echo "  Install one in range with:  brew install python@$3"
+    else
+      echo "  Install a newer one with:  brew install python@3.13"
+    fi
+    echo "  (or from https://www.python.org/downloads/)"
+  else
+    if [ -n "${3:-}" ]; then
+      echo "  Install one in range, e.g.:  sudo apt-get install python$3 python$3-venv"
+    else
+      echo "  Install one with:  sudo apt-get install python3 python3-venv python3-pip"
+    fi
   fi
   echo "  Then run this installer again and pick that engine."
+  echo "Using Native offline for now, so you still get a working voice."
+}
+
+# Shown when an interpreter IS new enough but the environment could not be built.
+deny_venv() {
+  echo ""
+  echo "$1 needs a private Python environment and one could not be created at $VENV."
+  if [ "$(uname)" = "Darwin" ]; then
+    echo "  Check that the venv module is present:  $(find_python "$2" 2>/dev/null || echo python3) -m venv --help"
+  else
+    echo "  On Debian/Ubuntu this usually means:  sudo apt-get install python3-venv"
+  fi
   echo "Using Native offline for now, so you still get a working voice."
 }
 
@@ -305,27 +410,40 @@ case "$choice" in
     echo "ElevenLabs selected. Key stored locally (not in any script)."
     ;;
   3)
-    if ! have_python; then
-      deny_python_engine "Kokoro"
+    if ! find_python "$PY_MIN_KOKORO" "$PY_MAX_KOKORO" >/dev/null 2>&1; then
+      deny_python_engine "Kokoro" "$PY_MIN_KOKORO" "$PY_MAX_KOKORO"
+      echo "engine=native" >> "$CFG"
+    elif ! PYX="$(python_for "$PY_MIN_KOKORO" "$PY_MAX_KOKORO")"; then
+      deny_venv "Kokoro" "$PY_MIN_KOKORO"
       echo "engine=native" >> "$CFG"
     else
       echo "Kokoro offline selected. Nothing will leave this machine."
+      echo "Using $("$PYX" -c 'import sys;print("Python "+".".join(map(str,sys.version_info[:3])))') in $VENV"
       echo "Kokoro keeps a warm background process so replies start speaking in ~1.7s."
       echo "It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes."
 
       # Dependencies and the model come first, so that voice previews are quick when
       # you get to the list rather than costing ten seconds each.
       # espeak-ng is not required: the espeakng-loader dependency bundles it.
-      if ! python3 -c 'import kokoro, soundfile' >/dev/null 2>&1; then
-        echo "Installing Kokoro (pip3 install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes."
-        python3 -m pip install --user kokoro soundfile
+      # Installed INTO the venv, never with --user: Homebrew pythons are PEP 668
+      # externally managed and refuse --user outright.
+      if ! "$PYX" -c 'import kokoro, soundfile' >/dev/null 2>&1; then
+        echo "Installing Kokoro into $VENV ... this pulls in PyTorch and takes a few minutes."
+        if ! "$PYX" -m pip install kokoro soundfile; then
+          echo ""
+          echo "Kokoro's dependencies would not install. Falling back to the basic 'say' voice."
+          echo "The error above is the real one; rerun with a different Python if it mentions a version."
+          echo "engine=native" >> "$CFG"
+          break_kokoro=1
+        fi
       fi
 
+      if [ "${break_kokoro:-0}" != 1 ]; then
       # Warm up: pre-download the weights and the spaCy model that Kokoro's text
       # front-end fetches on first use, so the first spoken reply is not silent.
       echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
       probe="$STATE/warmup.wav"
-      printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "bf_emma" 1.15 || true
+      printf 'agent voice is ready' | "$PYX" "$TARGET/kokoro-tts.py" "$probe" "bf_emma" 1.15 || true
       kokoro_works=0
       if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then kokoro_works=1; fi
       rm -f "$probe"
@@ -333,19 +451,23 @@ case "$choice" in
       if [ "$kokoro_works" = 1 ]; then
         echo "Kokoro is working."
         echo ""
+        # Hand the picker the interpreter we just verified. Config is not written
+        # until below, so without this the previews resolve bare python3.
+        PICK_PY="$PYX" export PICK_PY
         select_voice "bf_emma"
         kv="$chosen_voice"
       else
         echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
-        echo "run the pip3 install above by hand to see the error."
+        echo "run  $PYX -m pip install kokoro soundfile  by hand to see the error."
         kv="bf_emma"
       fi
 
       echo "engine=kokoro" >> "$CFG"
       echo "kokoro_voice=$kv" >> "$CFG"
       echo "kokoro_speed=1.15" >> "$CFG"
-      echo "python_cmd=$(python_path)" >> "$CFG"
+      echo "python_cmd=$PYX" >> "$CFG"
       echo "Voice: $kv"
+      fi
     fi
     ;;
   4)
@@ -353,23 +475,27 @@ case "$choice" in
     echo "Native offline selected (macOS 'say'). Add premium voices in System Settings > Accessibility > Spoken Content."
     ;;
   *)
-    if ! have_python; then
-      deny_python_engine "edge-tts"
+    if ! find_python "$PY_MIN_EDGE" "$PY_MAX_EDGE" >/dev/null 2>&1; then
+      deny_python_engine "edge-tts" "$PY_MIN_EDGE" "$PY_MAX_EDGE"
+      echo "engine=native" >> "$CFG"
+    elif ! PYX="$(python_for "$PY_MIN_EDGE" "$PY_MAX_EDGE")"; then
+      deny_venv "edge-tts" "$PY_MIN_EDGE"
       echo "engine=native" >> "$CFG"
     else
       echo "engine=edge" >> "$CFG"
       echo "edge_voice=en-US-AvaNeural" >> "$CFG"
       echo "edge_rate=+15%" >> "$CFG"
-      echo "python_cmd=$(python_path)" >> "$CFG"
+      echo "python_cmd=$PYX" >> "$CFG"
       echo "edge-tts (Ava) selected."
-      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
-        echo "Installing edge-tts (pip3 install --user edge-tts) ..."
-        python3 -m pip install --user edge-tts
+      # Into the venv, not --user — see the PEP 668 note above python resolution.
+      if ! "$PYX" -m edge_tts --version >/dev/null 2>&1; then
+        echo "Installing edge-tts into $VENV ..."
+        "$PYX" -m pip install edge-tts || true
       fi
       # Confirm it can actually speak, rather than assuming pip succeeded.
-      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
+      if ! "$PYX" -m edge_tts --version >/dev/null 2>&1; then
         echo "edge-tts still is not working, so replies will use the basic 'say' voice."
-        echo "Run 'python3 -m pip install --user edge-tts' by hand to see the error."
+        echo "Run  $PYX -m pip install edge-tts  by hand to see the error."
       fi
     fi
     ;;

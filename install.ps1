@@ -41,10 +41,28 @@ function Get-Agents {
       Key        = $d.Key
       Name       = $d.Name
       Note       = $d.Note
-      Installed  = [bool](Get-Command $d.Key -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $h $d.Dir))
+      # Installed means the command is runnable, nothing weaker. A config
+      # directory is NOT evidence: hooks only fire from inside a running agent,
+      # so an agent whose binary is absent cannot use agent-voice whatever it
+      # left on disk. The old `-or (Test-Path ...Dir)` reported Codex and Kimi as
+      # installed on any machine carrying a stale or foreign config folder.
+      Installed  = [bool](Get-Command $d.Key -ErrorAction SilentlyContinue)
+      # Worth saying separately — usually means installed once, or off PATH.
+      Configured = [bool](Test-Path (Join-Path $h $d.Dir))
       Registered = $registered
     }
   }
+}
+
+# One place decides the label, so the piped and interactive lists cannot drift.
+function Get-StatusTag ($it, $open, $close) {
+  $text =
+    if ($it.Registered)     { 'already set up' }
+    elseif ($it.Installed)  { '' }
+    elseif ($it.Configured) { 'config found, but not on PATH' }
+    else                    { 'not detected on this machine' }
+  if ([string]::IsNullOrEmpty($text)) { return '' }
+  return "  $open$text$close"
 }
 
 # Arrow-key checklist. Falls back to a typed list when stdin is not a real console
@@ -56,7 +74,7 @@ function Select-Agents ($items) {
   if ([Console]::IsInputRedirected) {
     Write-Host 'Which agents should use agent-voice? (comma-separated)'
     foreach ($it in $items) {
-      $tag = if (-not $it.Installed) { '  [not detected]' } elseif ($it.Registered) { '  [already set up]' } else { '' }
+      $tag = Get-StatusTag $it '[' ']'
       Write-Host ("  {0,-8} {1,-16} {2}{3}" -f $it.Key, $it.Name, $it.Note, $tag)
     }
     $typed = Read-Host 'Agents (Enter for claude)'
@@ -85,7 +103,7 @@ function Select-Agents ($items) {
         $it = $items[$i]
         $cursor = if ($i -eq $pos) { '>' } else { ' ' }
         $box    = if ($sel[$it.Key]) { '[x]' } else { '[ ]' }
-        $tag    = if (-not $it.Installed) { '  (not detected on this machine)' } elseif ($it.Registered) { '  (already set up)' } else { '' }
+        $tag    = Get-StatusTag $it '(' ')'
         $line   = "{0} {1} {2,-16} {3}{4}" -f $cursor, $box, $it.Name, $it.Note, $tag
         if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
         $colour = if (-not $it.Installed) { 'DarkGray' } elseif ($i -eq $pos) { 'Cyan' } else { 'Gray' }
@@ -128,12 +146,21 @@ Write-Host ("Agents: " + $agents) -ForegroundColor Green
 
 # Does the `python` the hooks will actually call work? Guards against the Windows
 # Store stub, which sits on PATH and looks like an interpreter but is not one.
-function Test-Python {
+# $MinVersion is "major.minor". Asking only "is it Python 3" was not enough:
+# Kokoro pulls spacy, which needs thinc >= 8.3.12, which needs Python >= 3.10, so
+# on 3.9 pip fails with "No matching distribution found for thinc" and the whole
+# install dies. Same floor as install.sh's PY_MIN_KOKORO — keep the two in step.
+function Test-Python ($MinVersion = '3.9') {
   try {
-    $v = & python -c 'import sys; print(sys.version_info[0])' 2>$null
-    return ($LASTEXITCODE -eq 0 -and (($v | Out-String).Trim() -eq '3'))
+    $parts = $MinVersion.Split('.')
+    $v = & python -c "import sys; print(1 if sys.version_info >= ($($parts[0]), $($parts[1])) else 0)" 2>$null
+    return ($LASTEXITCODE -eq 0 -and (($v | Out-String).Trim() -eq '1'))
   } catch { return $false }
 }
+
+# Minimums per engine, mirroring install.sh.
+$PyMinEdge   = '3.9'
+$PyMinKokoro = '3.10'
 
 # Record the full path of the interpreter we just verified, rather than leaving the
 # hooks to resolve bare "python" later. They run with whatever PATH the agent that
@@ -151,9 +178,9 @@ function Get-PythonPath {
 # Shared message for the two engines that need Python. Falling back to native is
 # stated out loud rather than done quietly, so nobody ends up wondering why the
 # voice sounds robotic.
-function Deny-PythonEngine ($engineName) {
+function Deny-PythonEngine ($engineName, $MinVersion = '3.9') {
   Write-Host ''
-  Write-Host "Python 3 was not found on PATH, and $engineName needs it." -ForegroundColor Yellow
+  Write-Host "$engineName needs Python $MinVersion or newer, and no interpreter that new was found on PATH." -ForegroundColor Yellow
   Write-Host '  Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH",' -ForegroundColor Yellow
   Write-Host '  then run this installer again and pick that engine.' -ForegroundColor Yellow
   Write-Host '  (If Python is installed but only as "py", add it to PATH so plain "python" works.)' -ForegroundColor Yellow
@@ -190,7 +217,7 @@ switch ($choice) {
     Write-Host 'ElevenLabs selected. Key stored locally (not in any script).' -ForegroundColor Green
   }
   '3' {
-    if (-not (Test-Python)) { Deny-PythonEngine 'Kokoro'; $cfg += 'engine=native'; break }
+    if (-not (Test-Python $PyMinKokoro)) { Deny-PythonEngine 'Kokoro' $PyMinKokoro; $cfg += 'engine=native'; break }
     Write-Host 'Kokoro offline selected. Nothing will leave this machine.' -ForegroundColor Green
     Write-Host 'Kokoro keeps a warm background process so replies start speaking in ~1.7s.' -ForegroundColor Gray
     Write-Host 'It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes.' -ForegroundColor Gray
@@ -232,7 +259,7 @@ switch ($choice) {
     Write-Host 'Native offline selected.' -ForegroundColor Green
   }
   default {
-    if (-not (Test-Python)) { Deny-PythonEngine 'edge-tts'; $cfg += 'engine=native'; break }
+    if (-not (Test-Python $PyMinEdge)) { Deny-PythonEngine 'edge-tts' $PyMinEdge; $cfg += 'engine=native'; break }
     $cfg += 'engine=edge'; $cfg += 'edge_voice=en-US-AvaNeural'; $cfg += 'edge_rate=+15%'
     $cfg += ("python_cmd=" + (Get-PythonPath))
     Write-Host 'edge-tts (Ava) selected.' -ForegroundColor Green
