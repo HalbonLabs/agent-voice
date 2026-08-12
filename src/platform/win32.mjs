@@ -89,6 +89,23 @@ export function killTree(pid) {
   spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
 }
 
+// Desktop toast via the WinRT API, which Windows PowerShell 5.1 can reach
+// without any module install. Runs in the detached speaker, so its ~1 s of
+// startup delays nothing audible.
+export function notify(title, body) {
+  const esc = s => String(s).replace(/'/g, "''");
+  spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+    try {
+      [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+      $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+      $t = $xml.GetElementsByTagName('text')
+      $t.Item(0).AppendChild($xml.CreateTextNode('${esc(title)}')) | Out-Null
+      $t.Item(1).AppendChild($xml.CreateTextNode('${esc(body)}')) | Out-Null
+      $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+      [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('agent-voice').Show($toast)
+    } catch {}`], { stdio: 'ignore', windowsHide: true });
+}
+
 // The picker needs its own console window because the hook runs
 // non-interactively; `start` is the reliable way to get one.
 export function openPicker(root, sid, engine) {

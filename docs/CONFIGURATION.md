@@ -66,7 +66,21 @@ you change these in-session instead; the file sets the machine-wide default.
 | `eleven_voice`, `eleven_model` | ElevenLabs | a voice id from your account |
 | `native_voice` | Native, macOS | an installed system voice |
 | `voice_speed` | all | `1.25`, overrides the per-engine speed |
+| `voice_when` | policy | `always` / `problem` / `question` / `long` / `never` |
+| `voice_long_secs` | policy | threshold for `long` mode (default 45) |
+| `voice_min_secs` | policy | turns shorter than this are earcon-only outside `always` (default 15, 0 disables) |
+| `voice_earcons` | audio | `0` disables the intent tones |
+| `voice_notify` | reach | `0` disables desktop notifications on problem turns |
+| `ntfy_topic` | reach | an [ntfy](https://ntfy.sh) topic; problem turns over the push threshold buzz your phone |
+| `ntfy_server` | reach | self-hosted ntfy server (default `https://ntfy.sh`) |
+| `webhook_url` | reach | generic JSON webhook for Slack/Discord/Teams shims |
+| `voice_push_secs` | reach | minimum turn length before a push (default 120) |
 | `python_cmd` | edge-tts, Kokoro | the interpreter the hooks should use |
+
+Audio ducking and output-device selection are deliberately not implemented:
+both need native audio APIs (CoreAudio, the Windows audio session API) that
+cannot be reached honestly from a dependency-free install. They will come
+with a platform-native helper if demand shows up.
 
 `python_cmd` is written by the installer and is worth leaving alone: it pins
 the interpreter inside `~/.agent-voice/venv`, the one that actually has the

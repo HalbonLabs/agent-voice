@@ -47,6 +47,15 @@ export function killTree(pid) {
   try { process.kill(pid); } catch { /* already gone */ }
 }
 
+// Desktop notification. Quotes are stripped rather than escaped: osascript
+// string escaping is a bug farm, and a notification does not need them.
+export function notify(title, body) {
+  const clean = s => String(s).replace(/["\\]/g, '');
+  spawnSync('osascript',
+    ['-e', `display notification "${clean(body)}" with title "${clean(title)}"`],
+    { stdio: 'ignore' });
+}
+
 // The picker needs its own window because the hook runs non-interactively
 // with stdin carrying the JSON payload, so it has no keyboard to read. The
 // sid is clamped to [A-Za-z0-9_-] before it reaches this string (R-13).

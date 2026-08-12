@@ -13,6 +13,7 @@ import { join, dirname } from 'path';
 import { speak } from './engines.mjs';
 import { decide, recordUtterance } from './policy.mjs';
 import { dataFile, readConfig } from './config.mjs';
+import { shouldNotify, shouldPush, notificationParts, pushRemote } from './notify.mjs';
 import { platform } from './platform/index.mjs';
 
 const jobFile = process.argv[2];
@@ -35,17 +36,28 @@ try {
   // a silent dry run possible on a machine where sound would be disruptive.
   // The job and the policy decision are recorded so tests (and debugging) can
   // see exactly what would have been spoken and why.
+  const cfg = readConfig(job.home);
+  const notifying = shouldNotify(job, cfg);
+  const pushing = shouldPush(job, cfg);
+
   if (process.env.AGENT_VOICE_NO_AUDIO === '1') {
     try {
       writeFileSync(join(dirname(job.pidFile), 'last-job.json'),
-        JSON.stringify({ ...job, policy: decision }, null, 2));
+        JSON.stringify({ ...job, policy: decision, notify: notifying, push: pushing }, null, 2));
     } catch { /* fine */ }
+    // Push still runs in dry mode when configured: the tests point ntfy at a
+    // local server, and a silent machine can still buzz a phone.
+    if (pushing) await pushRemote(job, cfg);
   } else {
-    const cfg = readConfig(job.home);
     let earconWait = null;
     if (cfg.voice_earcons !== '0') {
       const earcon = dataFile(join('earcons', `${job.intent || 'done'}.wav`));
       if (existsSync(earcon)) earconWait = platform.playAsync(earcon, job.python);
+    }
+    // A problem you cannot hear (meeting, other desktop) still shows up (P5-1).
+    if (notifying) {
+      const { title, body } = notificationParts(job);
+      platform.notify(title, body);
     }
     if (decision.speech) {
       job.text = decision.prefix + job.text;
@@ -55,6 +67,7 @@ try {
     } else if (earconWait) {
       await earconWait;
     }
+    if (pushing) await pushRemote(job, cfg);
   }
 } finally {
   try { unlinkSync(job.pidFile); } catch { /* shush got there first */ }
