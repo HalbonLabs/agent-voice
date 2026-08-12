@@ -16,8 +16,10 @@ Get-ChildItem (Join-Path $state 'speak.*.pid') -ErrorAction SilentlyContinue | F
   Remove-Item $_.FullName -ErrorAction SilentlyContinue
 }
 
-# Killing the speak process skips its own cleanup, so tidy up the temp audio here
-# rather than leaving a file per interrupted session behind.
+# Killing the speak process skips its own cleanup, so tidy up the temp audio and
+# any unread job files here rather than leaving a file per interrupted session.
+Get-ChildItem (Join-Path $state 'job.*.json') -ErrorAction SilentlyContinue |
+  ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 Get-ChildItem $state -Filter 'say.*' -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Extension -in @('.wav', '.mp3') } |
   ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }

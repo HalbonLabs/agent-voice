@@ -1,10 +1,112 @@
 # agent-voice Stop hook (Windows). Speaks the <spoken> block for the active session,
 # using the engine chosen at install time. Always falls back to offline SAPI so
 # it degrades to "sounds basic" rather than "silent".
+#
+# Two phases in one file. The hook phase parses the payload, decides whether to
+# speak, resolves every setting, then relaunches this script hidden with
+# -JobFile and returns at once. That matters because Claude Code's async hooks
+# are unique: Codex, Kimi, and every other agent surveyed fully await their Stop
+# hook, so doing synthesis and playback inline stalled those agents for the
+# whole duration of speech (R-07). The child phase does the slow work; its PID
+# is what barge-in and shush stop.
+param([string]$JobFile)
 
 $ErrorActionPreference = 'SilentlyContinue'
 $root  = Join-Path $env:USERPROFILE '.agent-voice'
 $state = Join-Path $root 'state'
+
+# MCI player for MP3. Returns $true only if playback actually happened: MCI fails
+# silently otherwise (notably rc=304 when the path exceeds ~128 chars), and a
+# silent failure must fall through to SAPI rather than pass for success.
+function Play-Mp3 ($file, $al) {
+  Add-Type -Name Mci -Namespace Native -MemberDefinition @'
+[DllImport("winmm.dll", CharSet = CharSet.Auto)]
+public static extern int mciSendString(string cmd, System.Text.StringBuilder ret, int len, System.IntPtr hwnd);
+'@
+  if ([Native.Mci]::mciSendString("open `"$file`" type mpegvideo alias $al", $null, 0, [IntPtr]::Zero) -ne 0) { return $false }
+  $rc = [Native.Mci]::mciSendString("play $al wait", $null, 0, [IntPtr]::Zero)
+  [Native.Mci]::mciSendString("close $al", $null, 0, [IntPtr]::Zero) | Out-Null
+  return ($rc -eq 0)
+}
+
+# WAV playback via SoundPlayer, not MCI: it plays WAV natively, blocks until the
+# audio finishes, and has none of MCI's path-length limits.
+function Play-Wav ($file) {
+  try {
+    $player = New-Object System.Media.SoundPlayer $file
+    $player.PlaySync()
+    $player.Dispose()
+    return $true
+  } catch { return $false }
+}
+
+# ---------------------------------------------------------------- child phase
+if ($JobFile) {
+  if (-not (Test-Path $JobFile)) { exit 0 }
+  $job = Get-Content $JobFile -Raw -Encoding UTF8 | ConvertFrom-Json
+  Remove-Item $JobFile -Force
+  if (-not $job -or [string]::IsNullOrWhiteSpace($job.text)) { exit 0 }
+
+  $tag      = $job.tag
+  $text     = $job.text
+  $pidFile  = Join-Path $state "speak.$tag.pid"
+  $mp3      = Join-Path $state "say.$tag.mp3"
+  $wav      = Join-Path $state "say.$tag.wav"
+  $alias    = "ccvoice$PID"
+  $speedMul = if ($null -ne $job.speedMul) { [double]$job.speedMul } else { $null }
+
+  $spoke = $false
+  Remove-Item $mp3 -Force
+  Remove-Item $wav -Force
+
+  if ($job.engine -eq 'edge') {
+    & $job.pyExe -m edge_tts --text "$text" --voice $job.voice --rate=$($job.rate) --write-media "$mp3" 2>$null
+    if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
+  }
+  elseif ($job.engine -eq 'kokoro') {
+    $py = Join-Path $root 'kokoro-tts.py'
+    if (Test-Path $py) {
+      $prev = $OutputEncoding
+      $OutputEncoding = New-Object Text.UTF8Encoding $false
+      $text | & $job.pyExe $py $wav $job.voice $job.speed 2>$null
+      $OutputEncoding = $prev
+      if ((Test-Path $wav) -and ((Get-Item $wav).Length -gt 500)) { $spoke = Play-Wav $wav }
+    }
+  }
+  elseif ($job.engine -eq 'elevenlabs') {
+    # The key is read here, not passed through the job file, so it never rests
+    # in a second file.
+    $keyFile = Join-Path $root 'elevenlabs-key'
+    $key = if (Test-Path $keyFile) { (Get-Content $keyFile -Raw).Trim() } else { '' }
+    if ($key) {
+      try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $body = @{ text = $text; model_id = $job.model; voice_settings = @{ stability = 0.5; similarity_boost = 0.75; style = 0.0; use_speaker_boost = $true } } | ConvertTo-Json -Depth 5 -Compress
+        $bytes = [Text.Encoding]::UTF8.GetBytes($body)
+        $uri = "https://api.elevenlabs.io/v1/text-to-speech/$($job.voice)`?output_format=mp3_44100_128"
+        Invoke-WebRequest -Uri $uri -Method Post -Headers @{ 'xi-api-key' = $key } -ContentType 'application/json' -Body $bytes -OutFile $mp3 -TimeoutSec 20 -UseBasicParsing
+        if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
+      } catch { $spoke = $false }
+    }
+  }
+
+  # Fallback: offline Windows SAPI.
+  if (-not $spoke) {
+    Add-Type -AssemblyName System.Speech
+    $sapi = New-Object System.Speech.Synthesis.SpeechSynthesizer
+    # SAPI's scale is -10..10 with 0 normal, so 1.2x lands on its long-standing default of 2.
+    $sapi.Rate = if ($null -ne $speedMul) { [Math]::Max(-10, [Math]::Min(10, [int][Math]::Round(($speedMul - 1) * 10))) } else { 2 }
+    $sapi.Speak($text)
+    $sapi.Dispose()
+  }
+
+  Remove-Item $mp3 -Force
+  Remove-Item $wav -Force
+  Remove-Item $pidFile
+  exit 0
+}
+
+# ----------------------------------------------------------------- hook phase
 
 # --- load config (simple key=value file) ---
 $cfg = @{}
@@ -116,9 +218,6 @@ if ([string]::IsNullOrWhiteSpace($text)) { exit 0 }
 
 $tag     = if ($sid) { $sid } else { 'nosession' }
 $pidFile = Join-Path $state "speak.$tag.pid"
-$mp3     = Join-Path $state "say.$tag.mp3"
-$wav     = Join-Path $state "say.$tag.wav"
-$alias   = "ccvoice$PID"
 
 # Cut off this session's previous turn if it is still speaking. A PID alone is
 # not proof: after PID reuse it can belong to an unrelated process, so only
@@ -133,91 +232,49 @@ if (Test-Path $pidFile) {
   }
   Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
-$PID | Set-Content $pidFile
 
-# MCI player for MP3. Returns $true only if playback actually happened: MCI fails
-# silently otherwise (notably rc=304 when the path exceeds ~128 chars), and a
-# silent failure must fall through to SAPI rather than pass for success.
-function Play-Mp3 ($file, $al) {
-  Add-Type -Name Mci -Namespace Native -MemberDefinition @'
-[DllImport("winmm.dll", CharSet = CharSet.Auto)]
-public static extern int mciSendString(string cmd, System.Text.StringBuilder ret, int len, System.IntPtr hwnd);
-'@
-  if ([Native.Mci]::mciSendString("open `"$file`" type mpegvideo alias $al", $null, 0, [IntPtr]::Zero) -ne 0) { return $false }
-  $rc = [Native.Mci]::mciSendString("play $al wait", $null, 0, [IntPtr]::Zero)
-  [Native.Mci]::mciSendString("close $al", $null, 0, [IntPtr]::Zero) | Out-Null
-  return ($rc -eq 0)
-}
-
-# WAV playback via SoundPlayer, not MCI: it plays WAV natively, blocks until the
-# audio finishes, and has none of MCI's path-length limits.
-function Play-Wav ($file) {
-  try {
-    $player = New-Object System.Media.SoundPlayer $file
-    $player.PlaySync()
-    $player.Dispose()
-    return $true
-  } catch { return $false }
-}
-
-$spoke = $false
-Remove-Item $mp3 -Force
-Remove-Item $wav -Force
-
-if ($engine -eq 'edge') {
-  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
-  $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
-  # edge-tts wants a percentage delta, so 1.25x becomes +25%.
-  if ($null -ne $speedMul) {
-    $pct  = [int][Math]::Round(($speedMul - 1) * 100)
-    $rate = if ($pct -ge 0) { "+$pct%" } else { "$pct%" }
+# Resolve every setting now, so the child needs neither the payload nor the
+# config, then hand the slow work to a hidden child and return immediately.
+$voice = $null; $rate = $null; $speed = $null; $model = $null
+switch ($engine) {
+  'edge' {
+    $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.edge_voice) { $cfg.edge_voice } else { 'en-US-AvaNeural' }
+    $rate  = if ($cfg.edge_rate)  { $cfg.edge_rate }  else { '+15%' }
+    # edge-tts wants a percentage delta, so 1.25x becomes +25%.
+    if ($null -ne $speedMul) {
+      $pct  = [int][Math]::Round(($speedMul - 1) * 100)
+      $rate = if ($pct -ge 0) { "+$pct%" } else { "$pct%" }
+    }
   }
-  & $pyExe -m edge_tts --text "$text" --voice $voice --rate=$rate --write-media "$mp3" 2>$null
-  if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
-}
-elseif ($engine -eq 'kokoro') {
-  # Offline neural voice. ~1.7s once the warm daemon is up; the client starts one
-  # if it is not. The very first call ever also downloads weights, and that turn
-  # takes ~12s or falls back to SAPI.
-  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
-  $speed = if ($null -ne $speedMul) { $speedMul } elseif ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
-  $py    = Join-Path $root 'kokoro-tts.py'
-  if (Test-Path $py) {
-    $prev = $OutputEncoding
-    $OutputEncoding = New-Object Text.UTF8Encoding $false
-    $text | & $pyExe $py $wav $voice $speed 2>$null
-    $OutputEncoding = $prev
-    if ((Test-Path $wav) -and ((Get-Item $wav).Length -gt 500)) { $spoke = Play-Wav $wav }
+  'kokoro' {
+    $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.kokoro_voice) { $cfg.kokoro_voice } else { 'bf_emma' }
+    $speed = if ($null -ne $speedMul) { $speedMul } elseif ($cfg.kokoro_speed) { $cfg.kokoro_speed } else { '1.15' }
   }
-}
-elseif ($engine -eq 'elevenlabs') {
-  $keyFile = Join-Path $root 'elevenlabs-key'
-  $key = if (Test-Path $keyFile) { (Get-Content $keyFile -Raw).Trim() } else { '' }
-  $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.eleven_voice) { $cfg.eleven_voice } else { 'JBFqnCBsd6RMkjVDRZzb' }
-  $model = if ($cfg.eleven_model) { $cfg.eleven_model } else { 'eleven_flash_v2_5' }
-  if ($key) {
-    try {
-      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-      $body = @{ text = $text; model_id = $model; voice_settings = @{ stability = 0.5; similarity_boost = 0.75; style = 0.0; use_speaker_boost = $true } } | ConvertTo-Json -Depth 5 -Compress
-      $bytes = [Text.Encoding]::UTF8.GetBytes($body)
-      $uri = "https://api.elevenlabs.io/v1/text-to-speech/$voice`?output_format=mp3_44100_128"
-      Invoke-WebRequest -Uri $uri -Method Post -Headers @{ 'xi-api-key' = $key } -ContentType 'application/json' -Body $bytes -OutFile $mp3 -TimeoutSec 20 -UseBasicParsing
-      if ((Test-Path $mp3) -and ((Get-Item $mp3).Length -gt 500)) { $spoke = Play-Mp3 $mp3 $alias }
-    } catch { $spoke = $false }
+  'elevenlabs' {
+    $voice = if ($voiceOverride) { $voiceOverride } elseif ($cfg.eleven_voice) { $cfg.eleven_voice } else { 'JBFqnCBsd6RMkjVDRZzb' }
+    $model = if ($cfg.eleven_model) { $cfg.eleven_model } else { 'eleven_flash_v2_5' }
   }
 }
 
-# Fallback: offline Windows SAPI.
-if (-not $spoke) {
-  Add-Type -AssemblyName System.Speech
-  $sapi = New-Object System.Speech.Synthesis.SpeechSynthesizer
-  # SAPI's scale is -10..10 with 0 normal, so 1.2x lands on its long-standing default of 2.
-  $sapi.Rate = if ($null -ne $speedMul) { [Math]::Max(-10, [Math]::Min(10, [int][Math]::Round(($speedMul - 1) * 10))) } else { 2 }
-  $sapi.Speak($text)
-  $sapi.Dispose()
-}
+$jobPath = Join-Path $state "job.$tag.json"
+@{
+  tag      = $tag
+  text     = $text
+  engine   = $engine
+  voice    = $voice
+  rate     = $rate
+  speed    = $speed
+  model    = $model
+  speedMul = $speedMul
+  pyExe    = $pyExe
+} | ConvertTo-Json -Compress | Set-Content $jobPath -Encoding UTF8
 
-Remove-Item $mp3 -Force
-Remove-Item $wav -Force
-Remove-Item $pidFile
+# One string, not an array: PowerShell 5.1's -ArgumentList array form does not
+# quote elements containing spaces, and USERPROFILE paths often have them.
+$self = $MyInvocation.MyCommand.Path
+$argStr = "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -JobFile `"$jobPath`""
+$proc = Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $argStr -PassThru
+# The parent records the child's PID: no window where the pidfile is missing or
+# holds a PID that has not claimed the speech yet.
+if ($proc) { $proc.Id | Set-Content $pidFile }
 exit 0
