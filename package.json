@@ -1,0 +1,12 @@
+{
+  "name": "agent-voice",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "lint:sh": "shellcheck install.sh uninstall.sh core/macos/*.sh",
+    "lint:ps": "pwsh -NoProfile -File test/lint-ps.ps1"
+  }
+}

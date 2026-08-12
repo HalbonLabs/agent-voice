@@ -1,0 +1,148 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { main, forms } from '../lib/register.mjs';
+
+// Every test runs against a fresh fake home; the real one is never touched.
+function fakeHome() {
+  return mkdtempSync(join(tmpdir(), 'av-home-'));
+}
+// Must contain "agent-voice", like every real install path: that substring is
+// how register.mjs recognises its own entries (fragile by design; see R-09).
+const SCRIPTS = join(tmpdir(), '.agent-voice', 'core', 'windows');
+
+function install(home, providers, platform = 'win') {
+  main([`mode=install`, `home=${home}`, `platform=${platform}`, `scripts=${SCRIPTS}`, `providers=${providers}`]);
+}
+function uninstall(home, providers) {
+  main([`mode=uninstall`, `home=${home}`, `providers=${providers}`]);
+}
+const readSettings = home => JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+
+const oursIn = groups => (groups || []).filter(g => JSON.stringify(g).includes('agent-voice'));
+
+test('install into an empty home creates both hook events', () => {
+  const home = fakeHome();
+  install(home, 'claude');
+  const s = readSettings(home);
+  assert.equal(oursIn(s.hooks.UserPromptSubmit).length, 1);
+  assert.equal(oursIn(s.hooks.Stop).length, 1);
+  // Windows Claude gets async so speech does not block the turn (see R-07).
+  assert.equal(s.hooks.Stop[0].hooks[0].async, true);
+  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 10);
+});
+
+test('mac install does not set async', () => {
+  const home = fakeHome();
+  install(home, 'claude', 'mac');
+  const s = readSettings(home);
+  assert.equal('async' in s.hooks.Stop[0].hooks[0], false);
+  assert.equal(s.hooks.Stop[0].hooks[0].command, 'bash');
+});
+
+test('unrelated hooks and top-level keys survive an install', () => {
+  const home = fakeHome();
+  const original = {
+    model: 'opus',
+    env: { FOO: 'bar' },
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: 'notify-send done' }] }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'audit.sh' }] }],
+    },
+  };
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify(original, null, 2));
+  install(home, 'claude');
+  const s = readSettings(home);
+  assert.equal(s.model, 'opus');
+  assert.deepEqual(s.env, { FOO: 'bar' });
+  assert.deepEqual(s.hooks.PreToolUse, original.hooks.PreToolUse);
+  assert.deepEqual(s.hooks.Stop[0], original.hooks.Stop[0]);
+  assert.equal(s.hooks.Stop.length, 2);
+});
+
+test('installing twice never duplicates', () => {
+  const home = fakeHome();
+  install(home, 'claude');
+  install(home, 'claude');
+  const s = readSettings(home);
+  assert.equal(oursIn(s.hooks.UserPromptSubmit).length, 1);
+  assert.equal(oursIn(s.hooks.Stop).length, 1);
+});
+
+test('uninstall restores a file with prior content exactly', () => {
+  const home = fakeHome();
+  const original = {
+    model: 'opus',
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'notify-send done' }] }] },
+  };
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify(original, null, 2));
+  install(home, 'claude');
+  uninstall(home, 'claude');
+  assert.deepEqual(readSettings(home), original);
+});
+
+test('uninstall on a config that was only ours removes the hooks key entirely', () => {
+  const home = fakeHome();
+  install(home, 'claude');
+  uninstall(home, 'claude');
+  assert.deepEqual(readSettings(home), {});
+});
+
+test('an unparseable settings.json is left untouched', () => {
+  const home = fakeHome();
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  const broken = '{ "hooks": this is not json';
+  writeFileSync(join(home, '.claude', 'settings.json'), broken);
+  install(home, 'claude');
+  assert.equal(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'), broken);
+});
+
+test('codex entries use a single command string', () => {
+  const home = fakeHome();
+  install(home, 'codex');
+  const s = JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8'));
+  const entry = s.hooks.Stop[0].hooks[0];
+  assert.equal(typeof entry.command, 'string');
+  assert.match(entry.command, /^powershell\.exe /);
+  assert.equal('args' in entry, false);
+});
+
+test('kimi toml block installs, reinstalls once, uninstalls clean', () => {
+  const home = fakeHome();
+  const tomlPath = join(home, '.kimi-code', 'config.toml');
+  mkdirSync(join(home, '.kimi-code'), { recursive: true });
+  const original = '[general]\ntheme = "dark"\n';
+  writeFileSync(tomlPath, original);
+
+  install(home, 'kimi');
+  install(home, 'kimi');
+  let txt = readFileSync(tomlPath, 'utf8');
+  assert.equal((txt.match(/>>> agent-voice >>>/g) || []).length, 1);
+  assert.match(txt, /theme = "dark"/);
+  assert.match(txt, /event = "UserPromptSubmit"/);
+  assert.match(txt, /event = "Stop"/);
+
+  uninstall(home, 'kimi');
+  txt = readFileSync(tomlPath, 'utf8');
+  assert.equal(txt.includes('agent-voice'), false);
+  assert.match(txt, /theme = "dark"/);
+});
+
+test('unknown provider is reported, not fatal', () => {
+  const home = fakeHome();
+  install(home, 'claude,doesnotexist');
+  assert.equal(existsSync(join(home, '.claude', 'settings.json')), true);
+});
+
+test('forms builds platform-correct invocations', () => {
+  const win = forms('speak', 'win', 'C:\\scripts');
+  assert.equal(win.argv.command, 'powershell.exe');
+  assert.match(win.single, /speak\.ps1"$/);
+  const mac = forms('speak', 'mac', '/opt/scripts');
+  assert.equal(mac.argv.command, 'bash');
+  assert.deepEqual(mac.argv.args, [join('/opt/scripts', 'speak.sh')]);
+});
