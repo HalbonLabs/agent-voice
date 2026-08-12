@@ -129,37 +129,77 @@ if (-not (@($catalogue | Where-Object { $_.Installed }).Count -gt 0)) {
 $agents = Select-Agents $catalogue
 Write-Host ("Agents: " + $agents) -ForegroundColor Green
 
-# Does the `python` the hooks will actually call work? Guards against the Windows
-# Store stub, which sits on PATH and looks like an interpreter but is not one.
-function Test-Python {
+# Kokoro declares Requires-Python >=3.10,<3.13. An interpreter that is too NEW
+# is rejected as firmly as one too old: on 3.13, pip falls back to building
+# blis/thinc from source, which fails deep inside the install with an error
+# that looks nothing like a version problem.
+$PyMinEdge   = [version]'3.9'
+$PyMinKokoro = [version]'3.10'
+$PyMaxKokoro = [version]'3.12'
+
+# Probe one interpreter invocation: returns its full path if its version is
+# inside [min, max], else $null. Guards against the Windows Store stub, which
+# sits on PATH and looks like an interpreter but is not one.
+function Test-PyCandidate ($exe, $extraArgs, $min, $max) {
   try {
-    $v = & python -c 'import sys; print(sys.version_info[0])' 2>$null
-    return ($LASTEXITCODE -eq 0 -and (($v | Out-String).Trim() -eq '3'))
-  } catch { return $false }
+    # No quote characters inside the probe: PowerShell 5.1 strips embedded
+    # double quotes from native-command arguments, and python then sees a
+    # syntax error instead of a version.
+    $out = & $exe @extraArgs -c 'import sys; v = sys.version_info; print(str(v[0]) + chr(46) + str(v[1])); print(sys.executable)' 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $lines = @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    if ($lines.Count -lt 2) { return $null }
+    $v = [version]$lines[0]
+    if ($v -lt $min) { return $null }
+    if ($max -and $v -gt $max) { return $null }
+    if (Test-Path $lines[1]) { return $lines[1] }
+    return $null
+  } catch { return $null }
 }
 
-# Record the full path of the interpreter we just verified, rather than leaving the
-# hooks to resolve bare "python" later. They run with whatever PATH the agent that
-# launched them has, which may put a project venv first, and a venv without the
-# dependencies means a silent drop to the robotic voice.
-function Get-PythonPath {
-  try {
-    $p = & python -c 'import sys; print(sys.executable)' 2>$null
-    $p = ($p | Out-String).Trim()
-    if ($p -and (Test-Path $p)) { return $p }
-  } catch { }
-  return 'python'
+# Sweep newest-allowed-first: the py launcher lets us ask for a specific minor
+# version even when bare "python" resolves to one outside the window.
+function Find-Python ($min, $max) {
+  $tries = @(
+    @{ Exe = 'py';      Args = @('-3.12') },
+    @{ Exe = 'py';      Args = @('-3.11') },
+    @{ Exe = 'py';      Args = @('-3.10') },
+    @{ Exe = 'python';  Args = @() },
+    @{ Exe = 'python3'; Args = @() },
+    @{ Exe = 'py';      Args = @('-3') }
+  )
+  foreach ($t in $tries) {
+    $p = Test-PyCandidate $t.Exe $t.Args $min $max
+    if ($p) { return $p }
+  }
+  return $null
 }
 
-# Shared message for the two engines that need Python. Falling back to native is
-# stated out loud rather than done quietly, so nobody ends up wondering why the
-# voice sounds robotic.
-function Deny-PythonEngine ($engineName) {
+# The dependencies live in a private venv at ~/.agent-voice/venv, not in
+# --user site-packages: --user is refused outright by Store and MSYS2 Pythons,
+# and a shared site bleeds into and from project environments. python_cmd in
+# the config points into the venv, so the hooks always find what was installed.
+function Initialize-Venv ($basePython) {
+  $vdir = Join-Path $target 'venv'
+  $vpy  = Join-Path $vdir 'Scripts\python.exe'
+  if (-not (Test-Path $vpy)) {
+    Write-Host "Creating private environment at $vdir ..."
+    & $basePython -m venv $vdir
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $vpy)) { return $null }
+  }
+  return $vpy
+}
+
+# Falling back to native is stated out loud rather than done quietly, so nobody
+# ends up wondering why the voice sounds robotic. Names the accepted range: the
+# instinct on a version error is to install the newest Python, which for Kokoro
+# makes it worse.
+function Deny-PythonEngine ($engineName, $rangeText) {
   Write-Host ''
-  Write-Host "Python 3 was not found on PATH, and $engineName needs it." -ForegroundColor Yellow
-  Write-Host '  Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH",' -ForegroundColor Yellow
+  Write-Host "No usable Python for $engineName was found. It needs $rangeText." -ForegroundColor Yellow
+  Write-Host '  Install one from https://www.python.org/downloads/ and tick "Add python.exe to PATH",' -ForegroundColor Yellow
   Write-Host '  then run this installer again and pick that engine.' -ForegroundColor Yellow
-  Write-Host '  (If Python is installed but only as "py", add it to PATH so plain "python" works.)' -ForegroundColor Yellow
+  Write-Host "  Note: a NEWER Python does not help; the range really is $rangeText." -ForegroundColor Yellow
   Write-Host 'Using Native offline for now, so you still get a working voice.' -ForegroundColor Green
 }
 
@@ -193,7 +233,13 @@ switch ($choice) {
     Write-Host 'ElevenLabs selected. Key stored locally (not in any script).' -ForegroundColor Green
   }
   '3' {
-    if (-not (Test-Python)) { Deny-PythonEngine 'Kokoro'; $cfg += 'engine=native'; break }
+    $base = Find-Python $PyMinKokoro $PyMaxKokoro
+    if (-not $base) { Deny-PythonEngine 'Kokoro' 'Python 3.10 to 3.12'; $cfg += 'engine=native'; break }
+    $vpy = Initialize-Venv $base
+    if (-not $vpy) {
+      Write-Host "Could not create the private environment (using $base). Falling back to Native offline." -ForegroundColor Yellow
+      $cfg += 'engine=native'; break
+    }
     Write-Host 'Kokoro offline selected. Nothing will leave this machine.' -ForegroundColor Green
     Write-Host 'Kokoro keeps a warm background process so replies start speaking in ~1.7s.' -ForegroundColor Gray
     Write-Host 'It uses about 1.7GB of RAM while resident, and exits after 15 idle minutes.' -ForegroundColor Gray
@@ -202,32 +248,37 @@ switch ($choice) {
     # you get to the list rather than costing ten seconds each.
     # espeak-ng is not required: the espeakng-loader dependency bundles it.
     $have = $false
-    try { python -c 'import kokoro, soundfile' *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
+    try { & $vpy -c 'import kokoro, soundfile' *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
     if (-not $have) {
-      Write-Host 'Installing Kokoro (pip install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes.'
-      python -m pip install --user kokoro soundfile
+      Write-Host 'Installing Kokoro into the private environment ... this pulls in PyTorch and takes a few minutes.'
+      & $vpy -m pip install kokoro soundfile
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host 'The Kokoro install FAILED (see pip output above). Falling back to Native offline;' -ForegroundColor Red
+        Write-Host "re-run this installer after fixing it. Environment: $vpy" -ForegroundColor Red
+        $cfg += 'engine=native'; break
+      }
     }
 
     # Warm up: pre-download the weights and the spaCy model that Kokoro's text
     # front-end fetches on first use, so the first spoken reply is not silent.
     Write-Host 'Downloading Kokoro voice weights (~300MB) and language model (one time) ...'
     $probe = Join-Path $state 'warmup.wav'
-    'agent voice is ready' | python (Join-Path $target 'kokoro-tts.py') $probe 'bf_emma' 1.15
+    'agent voice is ready' | & $vpy (Join-Path $target 'kokoro-tts.py') $probe 'bf_emma' 1.15
     $kokoroWorks = (Test-Path $probe) -and ((Get-Item $probe).Length -gt 500)
     Remove-Item $probe -Force -ErrorAction SilentlyContinue
 
     if ($kokoroWorks) {
       Write-Host 'Kokoro is working.' -ForegroundColor Green
       Write-Host ''
-      $kv = Select-Voice $KOKORO_VOICES $target $state 'bf_emma' (Get-PythonPath)
+      $kv = Select-Voice $KOKORO_VOICES $target $state 'bf_emma' $vpy
     } else {
       Write-Host 'Kokoro could not synthesise yet. Voice will use the basic Windows one until this is fixed;' -ForegroundColor Yellow
-      Write-Host 'run the pip install above by hand to see the error.' -ForegroundColor Yellow
+      Write-Host "run  $vpy -m pip install kokoro soundfile  by hand to see the error." -ForegroundColor Yellow
       $kv = 'bf_emma'
     }
 
     $cfg += 'engine=kokoro'; $cfg += "kokoro_voice=$kv"; $cfg += 'kokoro_speed=1.15'
-    $cfg += ("python_cmd=" + (Get-PythonPath))
+    $cfg += "python_cmd=$vpy"
     Write-Host ("Voice: " + $kv) -ForegroundColor Green
   }
   '4' {
@@ -235,18 +286,28 @@ switch ($choice) {
     Write-Host 'Native offline selected.' -ForegroundColor Green
   }
   default {
-    if (-not (Test-Python)) { Deny-PythonEngine 'edge-tts'; $cfg += 'engine=native'; break }
+    $base = Find-Python $PyMinEdge $null
+    if (-not $base) { Deny-PythonEngine 'edge-tts' 'Python 3.9 or newer'; $cfg += 'engine=native'; break }
+    $vpy = Initialize-Venv $base
+    if (-not $vpy) {
+      Write-Host "Could not create the private environment (using $base). Falling back to Native offline." -ForegroundColor Yellow
+      $cfg += 'engine=native'; break
+    }
     $cfg += 'engine=edge'; $cfg += 'edge_voice=en-US-AvaNeural'; $cfg += 'edge_rate=+15%'
-    $cfg += ("python_cmd=" + (Get-PythonPath))
+    $cfg += "python_cmd=$vpy"
     Write-Host 'edge-tts (Ava) selected.' -ForegroundColor Green
     $have = $false
-    try { python -m edge_tts --version *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
-    if (-not $have) { Write-Host 'Installing edge-tts (pip install --user edge-tts) ...'; python -m pip install --user edge-tts }
+    try { & $vpy -m edge_tts --version *> $null; if ($LASTEXITCODE -eq 0) { $have = $true } } catch {}
+    if (-not $have) {
+      Write-Host 'Installing edge-tts into the private environment ...'
+      & $vpy -m pip install edge-tts
+      if ($LASTEXITCODE -ne 0) { Write-Host 'The edge-tts install FAILED (see pip output above).' -ForegroundColor Red }
+    }
     # Confirm it can actually speak, rather than assuming pip succeeded.
-    try { python -m edge_tts --version *> $null } catch {}
+    try { & $vpy -m edge_tts --version *> $null } catch {}
     if ($LASTEXITCODE -ne 0) {
       Write-Host 'edge-tts still is not working, so replies will use the basic Windows voice.' -ForegroundColor Yellow
-      Write-Host 'Run "python -m pip install --user edge-tts" by hand to see the error.' -ForegroundColor Yellow
+      Write-Host "Run  $vpy -m pip install edge-tts  by hand to see the error." -ForegroundColor Yellow
     }
   }
 }

@@ -123,18 +123,51 @@ else
 fi
 echo "Agents: $agents"
 
-# Does the python3 the hooks will actually call work?
-have_python() {
-  python3 -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1
+# Kokoro declares Requires-Python >=3.10,<3.13. An interpreter that is too NEW
+# is rejected as firmly as one too old: on 3.13, pip falls back to building
+# blis/thinc from source, which fails deep inside the install with an error
+# that looks nothing like a version problem.
+PY_MIN_EDGE="3.9"
+PY_MIN_KOKORO="3.10"
+PY_MAX_KOKORO="3.12"
+
+# py_in_range CMD MIN MAX: the interpreter bounds-checks itself ("" = no max).
+py_in_range() {
+  "$1" -c '
+import sys
+def parse(s):
+    p = s.split("."); return (int(p[0]), int(p[1]) if len(p) > 1 else 0)
+lo = parse(sys.argv[1]); hi = sys.argv[2]
+v = tuple(sys.version_info[:2])
+sys.exit(0 if v >= lo and (not hi or v <= parse(hi)) else 1)
+' "$2" "$3" >/dev/null 2>&1
 }
 
-# Record the full path of the interpreter we just verified, rather than leaving the
-# hooks to resolve bare python3 later. They run with whatever PATH the agent that
-# launched them has, which may put a project venv first, and a venv without the
-# dependencies means a silent drop to the robotic voice.
-python_path() {
-  p="$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null)"
-  if [ -n "$p" ] && [ -x "$p" ]; then printf '%s' "$p"; else printf 'python3'; fi
+# find_python MIN MAX: sweep newest-allowed-first and print the interpreter's
+# full path. Recording the path matters because the hooks run with whatever
+# PATH the launching agent has, which may put a project venv first.
+find_python() {
+  for cand in python3.12 python3.11 python3.10 python3 python; do
+    command -v "$cand" >/dev/null 2>&1 || continue
+    py_in_range "$cand" "$1" "$2" || continue
+    "$cand" -c 'import sys; print(sys.executable)' 2>/dev/null
+    return 0
+  done
+  return 1
+}
+
+# The dependencies live in a private venv at ~/.agent-voice/venv, not in --user
+# site-packages: PEP 668 Pythons (Homebrew, Debian) refuse --user outright, and
+# a shared site bleeds into and from project environments. python_cmd in the
+# config points into the venv, so the hooks always find what was installed.
+setup_venv() {  # setup_venv BASE_PYTHON -> prints the venv interpreter path
+  vdir="$TARGET/venv"; vpy="$vdir/bin/python"
+  if [ ! -x "$vpy" ]; then
+    echo "Creating private environment at $vdir ..." >&2
+    "$1" -m venv "$vdir" >&2 || return 1
+  fi
+  [ -x "$vpy" ] || return 1
+  printf '%s' "$vpy"
 }
 
 # macOS has no scriptable global-hotkey API, so a shortcut cannot simply be
@@ -258,15 +291,17 @@ WFLOW
 
 # Shared message for the two engines that need Python. Falling back to native is
 # stated out loud rather than done quietly, so nobody ends up wondering why the
-# voice sounds robotic.
-deny_python_engine() {
+# voice sounds robotic. Names the accepted range: the instinct on a version
+# error is to install the newest Python, which for Kokoro makes it worse.
+deny_python_engine() {  # deny_python_engine ENGINE RANGE_TEXT
   echo ""
-  echo "Python 3 was not found on PATH, and $1 needs it."
+  echo "No usable Python for $1 was found. It needs $2."
   if [ "$(uname)" = "Darwin" ]; then
-    echo "  Install it with:  brew install python3     (or from https://www.python.org/downloads/)"
+    echo "  Install one with:  brew install python@3.12     (or from https://www.python.org/downloads/)"
   else
-    echo "  Install it with:  sudo apt-get install python3 python3-pip"
+    echo "  Install one with:  sudo apt-get install python3 python3-pip python3-venv"
   fi
+  echo "  Note: a NEWER Python does not help; the range really is $2."
   echo "  Then run this installer again and pick that engine."
   echo "Using Native offline for now, so you still get a working voice."
 }
@@ -308,8 +343,14 @@ case "$choice" in
     echo "ElevenLabs selected. Key stored locally (not in any script)."
     ;;
   3)
-    if ! have_python; then
-      deny_python_engine "Kokoro"
+    base_py="$(find_python "$PY_MIN_KOKORO" "$PY_MAX_KOKORO")" || base_py=""
+    vpy=""
+    [ -n "$base_py" ] && vpy="$(setup_venv "$base_py")"
+    if [ -z "$base_py" ]; then
+      deny_python_engine "Kokoro" "Python 3.10 to 3.12"
+      echo "engine=native" >> "$CFG"
+    elif [ -z "$vpy" ]; then
+      echo "Could not create the private environment (using $base_py). Falling back to Native offline."
       echo "engine=native" >> "$CFG"
     else
       echo "Kokoro offline selected. Nothing will leave this machine."
@@ -319,36 +360,48 @@ case "$choice" in
       # Dependencies and the model come first, so that voice previews are quick when
       # you get to the list rather than costing ten seconds each.
       # espeak-ng is not required: the espeakng-loader dependency bundles it.
-      if ! python3 -c 'import kokoro, soundfile' >/dev/null 2>&1; then
-        echo "Installing Kokoro (pip3 install --user kokoro soundfile) ... this pulls in PyTorch and takes a few minutes."
-        python3 -m pip install --user kokoro soundfile
+      kokoro_deps=1
+      if ! "$vpy" -c 'import kokoro, soundfile' >/dev/null 2>&1; then
+        echo "Installing Kokoro into the private environment ... this pulls in PyTorch and takes a few minutes."
+        if ! "$vpy" -m pip install kokoro soundfile; then
+          echo "The Kokoro install FAILED (see pip output above)."
+          echo "Re-run this installer after fixing it. Environment: $vpy"
+          kokoro_deps=0
+        fi
       fi
 
-      # Warm up: pre-download the weights and the spaCy model that Kokoro's text
-      # front-end fetches on first use, so the first spoken reply is not silent.
-      echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
-      probe="$STATE/warmup.wav"
-      printf 'agent voice is ready' | python3 "$TARGET/kokoro-tts.py" "$probe" "bf_emma" 1.15 || true
-      kokoro_works=0
-      if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then kokoro_works=1; fi
-      rm -f "$probe"
-
-      if [ "$kokoro_works" = 1 ]; then
-        echo "Kokoro is working."
-        echo ""
-        select_voice "bf_emma"
-        kv="$chosen_voice"
+      if [ "$kokoro_deps" = 0 ]; then
+        echo "engine=native" >> "$CFG"
       else
-        echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
-        echo "run the pip3 install above by hand to see the error."
-        kv="bf_emma"
-      fi
+        # Warm up: pre-download the weights and the spaCy model that Kokoro's text
+        # front-end fetches on first use, so the first spoken reply is not silent.
+        echo "Downloading Kokoro voice weights (~300MB) and language model (one time) ..."
+        probe="$STATE/warmup.wav"
+        printf 'agent voice is ready' | "$vpy" "$TARGET/kokoro-tts.py" "$probe" "bf_emma" 1.15 || true
+        kokoro_works=0
+        if [ -s "$probe" ] && [ "$(wc -c < "$probe")" -gt 500 ]; then kokoro_works=1; fi
+        rm -f "$probe"
 
-      echo "engine=kokoro" >> "$CFG"
-      echo "kokoro_voice=$kv" >> "$CFG"
-      echo "kokoro_speed=1.15" >> "$CFG"
-      echo "python_cmd=$(python_path)" >> "$CFG"
-      echo "Voice: $kv"
+        if [ "$kokoro_works" = 1 ]; then
+          echo "Kokoro is working."
+          echo ""
+          # pick-voice.sh was sourced before the config exists, so its pick_py
+          # resolved to bare python3; point previews at the venv we just built.
+          pick_py="$vpy"
+          select_voice "bf_emma"
+          kv="$chosen_voice"
+        else
+          echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"
+          echo "run  $vpy -m pip install kokoro soundfile  by hand to see the error."
+          kv="bf_emma"
+        fi
+
+        echo "engine=kokoro" >> "$CFG"
+        echo "kokoro_voice=$kv" >> "$CFG"
+        echo "kokoro_speed=1.15" >> "$CFG"
+        echo "python_cmd=$vpy" >> "$CFG"
+        echo "Voice: $kv"
+      fi
     fi
     ;;
   4)
@@ -356,23 +409,31 @@ case "$choice" in
     echo "Native offline selected (macOS 'say'). Add premium voices in System Settings > Accessibility > Spoken Content."
     ;;
   *)
-    if ! have_python; then
-      deny_python_engine "edge-tts"
+    base_py="$(find_python "$PY_MIN_EDGE" "")" || base_py=""
+    vpy=""
+    [ -n "$base_py" ] && vpy="$(setup_venv "$base_py")"
+    if [ -z "$base_py" ]; then
+      deny_python_engine "edge-tts" "Python 3.9 or newer"
+      echo "engine=native" >> "$CFG"
+    elif [ -z "$vpy" ]; then
+      echo "Could not create the private environment (using $base_py). Falling back to Native offline."
       echo "engine=native" >> "$CFG"
     else
       echo "engine=edge" >> "$CFG"
       echo "edge_voice=en-US-AvaNeural" >> "$CFG"
       echo "edge_rate=+15%" >> "$CFG"
-      echo "python_cmd=$(python_path)" >> "$CFG"
+      echo "python_cmd=$vpy" >> "$CFG"
       echo "edge-tts (Ava) selected."
-      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
-        echo "Installing edge-tts (pip3 install --user edge-tts) ..."
-        python3 -m pip install --user edge-tts
+      if ! "$vpy" -m edge_tts --version >/dev/null 2>&1; then
+        echo "Installing edge-tts into the private environment ..."
+        if ! "$vpy" -m pip install edge-tts; then
+          echo "The edge-tts install FAILED (see pip output above)."
+        fi
       fi
       # Confirm it can actually speak, rather than assuming pip succeeded.
-      if ! python3 -m edge_tts --version >/dev/null 2>&1; then
+      if ! "$vpy" -m edge_tts --version >/dev/null 2>&1; then
         echo "edge-tts still is not working, so replies will use the basic 'say' voice."
-        echo "Run 'python3 -m pip install --user edge-tts' by hand to see the error."
+        echo "Run  $vpy -m pip install edge-tts  by hand to see the error."
       fi
     fi
     ;;
