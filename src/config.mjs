@@ -31,9 +31,12 @@ export function ensureStateDir(home = homedir()) {
   return dir;
 }
 
-// data/ ships next to src/ both in the repo and in the install target.
+// data/ and lib/ ship next to src/ both in the repo and in the install target.
 export function dataFile(name) {
   return join(HERE, '..', 'data', name);
+}
+export function libFile(name) {
+  return join(HERE, '..', 'lib', name);
 }
 export const enginesData = JSON.parse(readFileSync(dataFile('engines.json'), 'utf8'));
 export const ENGINE_IDS = enginesData.engines.map(e => e.id);

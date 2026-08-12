@@ -63,3 +63,24 @@ export function pidCommand(pid) {
 export function killTree(pid) {
   spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
 }
+
+// The picker needs its own console window because the hook runs
+// non-interactively; `start` is the reliable way to get one.
+export function openPicker(root, sid, engine) {
+  const picker = `${root}\\pick-voice.ps1`;
+  const c = spawn('cmd.exe',
+    ['/c', 'start', '', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+     '-File', picker, '-SessionId', sid, '-Engine', engine, '-Root', root],
+    { detached: true, stdio: 'ignore' });
+  c.unref();
+  return true;
+}
+
+// Hidden and backgrounded: the hook returns at once while the preview plays.
+export function previewVoice(root, voiceId) {
+  const c = spawn('powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+     '-File', `${root}\\pick-voice.ps1`, '-Preview', voiceId, '-Root', root],
+    { detached: true, stdio: 'ignore', windowsHide: true });
+  c.unref();
+}

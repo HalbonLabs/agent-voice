@@ -29,17 +29,21 @@ test('install into an empty home creates both hook events', () => {
   const s = readSettings(home);
   assert.equal(oursIn(s.hooks.UserPromptSubmit).length, 1);
   assert.equal(oursIn(s.hooks.Stop).length, 1);
-  // Windows Claude gets async so speech does not block the turn (see R-07).
-  assert.equal(s.hooks.Stop[0].hooks[0].async, true);
+  // Both hooks are Node on every platform since the P1 core rewrite; no
+  // async flag anywhere, because only Claude has one and the hook is fast.
+  assert.equal(s.hooks.Stop[0].hooks[0].command, 'node');
+  assert.match(s.hooks.Stop[0].hooks[0].args[0], /hook-stop\.mjs$/);
+  assert.match(s.hooks.UserPromptSubmit[0].hooks[0].args[0], /hook-prompt\.mjs$/);
+  assert.equal('async' in s.hooks.Stop[0].hooks[0], false);
   assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 10);
 });
 
-test('mac install does not set async', () => {
+test('mac install registers the same node hooks', () => {
   const home = fakeHome();
   install(home, 'claude', 'mac');
   const s = readSettings(home);
-  assert.equal('async' in s.hooks.Stop[0].hooks[0], false);
-  assert.equal(s.hooks.Stop[0].hooks[0].command, 'bash');
+  assert.equal(s.hooks.Stop[0].hooks[0].command, 'node');
+  assert.match(s.hooks.Stop[0].hooks[0].args[0], /hook-stop\.mjs$/);
 });
 
 test('unrelated hooks and top-level keys survive an install', () => {
@@ -107,7 +111,7 @@ test('codex entries use a single command string', () => {
   const s = JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8'));
   const entry = s.hooks.Stop[0].hooks[0];
   assert.equal(typeof entry.command, 'string');
-  assert.match(entry.command, /^powershell\.exe /);
+  assert.match(entry.command, /^node ".*hook-stop\.mjs"$/);
   assert.equal('args' in entry, false);
 });
 
@@ -228,11 +232,11 @@ test('kimi toml writes are atomic with a backup too', () => {
   assert.equal(existsSync(tomlPath + '.agent-voice.tmp'), false);
 });
 
-test('forms builds platform-correct invocations', () => {
-  const win = forms('speak', 'win', 'C:\\scripts');
-  assert.equal(win.argv.command, 'powershell.exe');
-  assert.match(win.single, /speak\.ps1"$/);
-  const mac = forms('speak', 'mac', '/opt/scripts');
-  assert.equal(mac.argv.command, 'bash');
-  assert.deepEqual(mac.argv.args, [join('/opt/scripts', 'speak.sh')]);
+test('forms maps both hooks to their node entry points', () => {
+  const stop = forms('speak', 'win', 'C:\\scripts');
+  assert.equal(stop.argv.command, 'node');
+  assert.match(stop.single, /hook-stop\.mjs"$/);
+  const prompt = forms('voice-context', 'mac', '/opt/scripts');
+  assert.equal(prompt.argv.command, 'node');
+  assert.deepEqual(prompt.argv.args, [join('/opt/scripts', 'src', 'hook-prompt.mjs')]);
 });

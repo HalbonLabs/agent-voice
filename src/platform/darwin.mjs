@@ -1,6 +1,8 @@
-// macOS platform layer: play a file, speak with the native voice, identify and
-// stop processes. Everything engine-shaped lives above this in src/engines.
-import { execFileSync, spawnSync } from 'child_process';
+// macOS platform layer: play a file, speak with the native voice, open the
+// voice picker, identify and stop processes. Everything engine-shaped lives
+// above this in src/engines.
+import { execFileSync, spawnSync, spawn } from 'child_process';
+import { join } from 'path';
 
 export function play(file) {
   const r = spawnSync('afplay', [file], { stdio: 'ignore' });
@@ -33,4 +35,24 @@ export function pidCommand(pid) {
 export function killTree(pid) {
   spawnSync('pkill', ['-P', String(pid)], { stdio: 'ignore' });
   try { process.kill(pid); } catch { /* already gone */ }
+}
+
+// The picker needs its own window because the hook runs non-interactively
+// with stdin carrying the JSON payload, so it has no keyboard to read. The
+// sid is clamped to [A-Za-z0-9_-] before it reaches this string (R-13).
+export function openPicker(root, sid, engine) {
+  const script = join(root, 'pick-voice.sh');
+  const r = spawnSync('osascript',
+    ['-e', `tell application "Terminal" to do script "bash '${script}' --session '${sid}' '${engine}'"`],
+    { stdio: 'ignore' });
+  return r.status === 0;
+}
+
+// Backgrounded so the hook returns at once rather than holding up the prompt
+// while audio plays.
+export function previewVoice(root, voiceId) {
+  const c = spawn('bash', [join(root, 'pick-voice.sh'), '--preview', voiceId], {
+    detached: true, stdio: 'ignore', env: { ...process.env, ROOT: root },
+  });
+  c.unref();
 }

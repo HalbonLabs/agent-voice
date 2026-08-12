@@ -11,9 +11,11 @@ produces bugs that look nothing like their cause.
    the parent via `$!`. If shellcheck passes but you used a bash 4+ feature,
    it still breaks on a real Mac.
 
-2. **Windows/macOS parity.** Every behaviour exists twice, in
-   `core/windows/*.ps1` and `core/macos/*.sh`, until the planned Node core
-   collapses them. If you change one, change the other in the same PR, or say
+2. **Windows/macOS parity.** The hooks are one Node implementation in `src/`
+   with thin platform layers in `src/platform/`; parity there means keeping
+   `darwin.mjs` and `win32.mjs` capable of the same operations. The
+   installers, the voice picker and the small wrappers are still one file per
+   platform: if you change one side, change the other in the same PR, or say
    explicitly in the PR why it does not apply.
 
 3. **Never touch the real `$HOME` in tests.** Every test runs against a

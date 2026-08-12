@@ -10,11 +10,13 @@ Measured on CPU with torch 2.13, the same method for each engine:
 | edge-tts | 2.6 s |
 | Kokoro, first reply after install | ~12 s |
 
-The hook itself adds roughly a second of process startup on top, whichever
-engine you pick. On Windows that overhead was measured at ~1.4 s total hook
-time, of which 643 ms is `powershell.exe` startup itself (measured against a
-bare `exit 0`) and most of the rest is .NET assembly loading for JSON
-parsing; speech no longer blocks the agent for any of it.
+The hooks are Node and return in ~100 ms on this hardware (Stop hook 100 ms,
+prompt hook 124 ms, measured end to end including Node startup), with speech
+continuing in a detached process no agent waits for. The PowerShell hooks
+they replaced took ~1.4 s, of which 643 ms was `powershell.exe` startup
+itself (measured against a bare `exit 0`) and most of the rest .NET assembly
+loading; that overhead now exists only inside the detached speaker, where it
+delays nothing.
 
 ## Why the Kokoro daemon exists
 

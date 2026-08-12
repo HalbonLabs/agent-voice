@@ -26,6 +26,11 @@ New-Item -ItemType Directory -Force -Path (Join-Path $target 'lib') | Out-Null
 Copy-Item (Join-Path $src 'core\windows\*') $target -Force
 Copy-Item (Join-Path $src 'core\kokoro*.py') $target -Force
 Copy-Item (Join-Path $src 'lib\*') (Join-Path $target 'lib') -Force
+# The Node core: the two hooks, the command surface, and their shared data.
+Remove-Item (Join-Path $target 'src') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $target 'data') -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $src 'src') (Join-Path $target 'src') -Recurse -Force
+Copy-Item (Join-Path $src 'data') (Join-Path $target 'data') -Recurse -Force
 if (Test-Path (Join-Path $src 'VERSION')) { Copy-Item (Join-Path $src 'VERSION') $target -Force }
 Write-Host ("Installed scripts to " + $target)
 

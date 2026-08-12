@@ -46,6 +46,15 @@ All notable changes to agent-voice. Dates are UTC.
 - The macOS Quick Action plist XML-escapes the install path (R-20).
 
 ### Changed
+- The two hooks are now a single Node implementation (`src/`) on every
+  platform, replacing the four shell and PowerShell scripts (~1,370 lines
+  reduced to ~810 shared ones) that had already drifted apart. The hooks
+  return in ~100 ms where the PowerShell pair took ~1.4 s, the `voice ...`
+  command surface and every reply string exist exactly once, engine metadata
+  lives in `data/engines.json`, and `shush` delegates to the same
+  identity-checked stop logic the hooks use. ElevenLabs synthesis now uses
+  Node https instead of curl, which also keeps the key out of every process
+  list by construction.
 - Linux is refused at install time with an explanation instead of completing
   into permanent silence; support is planned as part of the cross-platform
   core rewrite (R-10).

@@ -38,6 +38,10 @@ chmod 700 "$STATE"
 cp -f "$SRC/core/macos/"* "$TARGET/"
 cp -f "$SRC/core/"kokoro*.py "$TARGET/"
 cp -f "$SRC/lib/"* "$TARGET/lib/"
+# The Node core: the two hooks, the command surface, and their shared data.
+rm -rf "$TARGET/src" "$TARGET/data"
+cp -R "$SRC/src" "$TARGET/src"
+cp -R "$SRC/data" "$TARGET/data"
 cp -f "$SRC/VERSION" "$TARGET/VERSION" 2>/dev/null || true
 chmod +x "$TARGET"/*.sh
 echo "Installed scripts to $TARGET"
