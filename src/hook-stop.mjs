@@ -4,7 +4,7 @@
 // runtime every supported agent ships, it starts in tens of milliseconds
 // where PowerShell took ~1.4 s, and no agent except Claude Code has async
 // hooks, so the hook path must return fast on its own (R-07).
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
@@ -14,7 +14,6 @@ import { kimiLastText } from '../lib/kimi-last-text.mjs';
 import { transcriptLastText } from '../lib/transcript-last-text.mjs';
 import { avHome, ensureStateDir, clampSid, resolveSession, engineMeta, defaultVoice } from './config.mjs';
 import { collectFacts } from './facts.mjs';
-import { platform } from './platform/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -55,7 +54,7 @@ function main(payload) {
   const grounded = collectFacts(sid, {
     cwd: getField(payload, 'cwd'),
     transcript_path: getField(payload, 'transcript_path'),
-  }, home, spoken.text);
+  }, home, spoken.text, spoken.intent);
 
   let intent = spoken.intent;
   // Derive intent from facts where they disagree with the model's own label:
@@ -69,20 +68,16 @@ function main(payload) {
 
   const p = s.paths;
 
-  // Cut off this session's previous turn if it is still speaking. A PID alone
-  // is not proof: after PID reuse it can belong to an unrelated process, so
-  // only signal it if its command line shows it is one of our speakers (R-04).
+  // The previous turn's speaker PID rides in the job; the child does the
+  // identity-checked kill (R-04). The check costs ~0.5 s on Windows via CIM,
+  // which belongs in the detached child, not in the path the agent waits on.
+  let prevPid = '';
   if (existsSync(p.pidFile)) {
-    let old = '';
-    try { old = readFileSync(p.pidFile, 'utf8').split('\n')[0].trim(); } catch { /* fine */ }
-    if (/^\d+$/.test(old)) {
-      const cmdline = platform.pidCommand(Number(old));
-      if (cmdline && /speak\.mjs/.test(cmdline)) platform.killTree(Number(old));
-    }
-    try { unlinkSync(p.pidFile); } catch { /* fine */ }
+    try { prevPid = readFileSync(p.pidFile, 'utf8').split('\n')[0].trim(); } catch { /* fine */ }
   }
 
   const job = {
+    prevPid: /^\d+$/.test(prevPid) ? Number(prevPid) : 0,
     home,
     tag: p.tag,
     text,

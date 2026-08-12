@@ -107,8 +107,8 @@ test('no stray files are left in the state dir', async () => {
   const home = fakeHome({ 'voice-on': '' });
   runHook(home, payload('s8', '<spoken>tidy</spoken>'));
   await waitGone(statePath(home, 'speak.s8.pid'));
-  // last-job.json is the deliberate dry-run record, not a stray.
-  const left = readdirSync(join(home, '.agent-voice', 'state'))
-    .filter(f => f !== 'voice-on' && f !== 'last-job.json');
+  // last-job.json and last-decision.json are deliberate records, not strays.
+  const KEEP = new Set(['voice-on', 'last-job.json', 'last-decision.json']);
+  const left = readdirSync(join(home, '.agent-voice', 'state')).filter(f => !KEEP.has(f));
   assert.deepEqual(left, []);
 });

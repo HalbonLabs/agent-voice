@@ -6,9 +6,45 @@
 //
 // Runs inside the detached speaker, where a slow check delays only audio,
 // never the agent.
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from 'fs';
 import { join, basename } from 'path';
 import { readConfig, stateDir } from './config.mjs';
+
+const LOCK_STALE_MS = 120000;   // a speaker older than this is dead, not speaking
+
+// Snooze: a global, temporal mute for meetings. Audio (earcon included) is
+// suppressed; desktop notifications still show, since they are the
+// meeting-friendly channel.
+export function snoozeUntil(home) {
+  try { return Number(readFileSync(join(stateDir(home), 'snooze-until'), 'utf8').trim()) || 0; }
+  catch { return 0; }
+}
+export function setSnooze(home, minutes) {
+  const p = join(stateDir(home), 'snooze-until');
+  if (!minutes) { try { unlinkSync(p); } catch { /* fine */ } return; }
+  writeFileSync(p, String(Date.now() + minutes * 60000));
+}
+
+// The speaking lock is what actually prevents two sessions talking over each
+// other: the rate limit alone cannot, because it is only recorded around a
+// speech that may run for many seconds. Holders identify themselves by PID;
+// a dead or stale holder never blocks anyone.
+export function speakingLockHeld(home) {
+  try {
+    const raw = JSON.parse(readFileSync(join(stateDir(home), 'speaking.lock'), 'utf8'));
+    if (!raw || Date.now() - raw.ts > LOCK_STALE_MS) return false;
+    try { process.kill(raw.pid, 0); return true; } catch { return false; }
+  } catch {
+    return false;
+  }
+}
+export function acquireSpeakingLock(home) {
+  try { writeFileSync(join(stateDir(home), 'speaking.lock'), JSON.stringify({ pid: process.pid, ts: Date.now() })); }
+  catch { /* fine */ }
+}
+export function releaseSpeakingLock(home) {
+  try { unlinkSync(join(stateDir(home), 'speaking.lock')); } catch { /* fine */ }
+}
 
 export const WHEN_MODES = ['always', 'problem', 'question', 'long', 'never'];
 const PROBLEM_INTENTS = new Set(['question', 'blocked', 'failed']);
@@ -47,6 +83,11 @@ export function decide(job, home) {
   const duration = Number(job.duration) || 0;
   const { mode } = whenMode(job.tag, home);
   const cut = CUT_THROUGH.has(intent);
+
+  // Snoozed means no audio at all, earcon included; notifications still show.
+  if (Date.now() < snoozeUntil(home)) {
+    return { speech: false, silent: true, prefix: '', reason: 'snoozed' };
+  }
 
   let speech = true;
   let reason = 'policy allows';
@@ -90,7 +131,7 @@ export function decide(job, home) {
     }
   }
 
-  return { speech, prefix, reason };
+  return { speech, silent: false, prefix, reason };
 }
 
 export function recordUtterance(home, text) {

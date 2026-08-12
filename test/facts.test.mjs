@@ -48,13 +48,22 @@ function transcriptFixture(dir, resultText, { isError = true, cmd = 'npm test' }
   return p;
 }
 
-test('factsSentence formats files, lines and test state', () => {
+test('factsSentence formats files, lines, commits and test state', () => {
   assert.equal(
     factsSentence({ diff: { files: 3, insertions: 40, deletions: 20 }, tests: { status: 'fail', failed: 2, passed: 38 } }),
     '3 files, 60 lines. Tests failing, 2 of 40.');
-  assert.equal(factsSentence({ edits: 1 }), '1 edit.');
+  assert.equal(
+    factsSentence({ diff: { files: 2, insertions: 10, deletions: 0, commits: 2 }, tests: { status: 'pass' } }),
+    '2 commits, 2 files, 10 lines. Tests passing.');
   assert.equal(factsSentence({ tests: { status: 'pass' } }), 'Tests passing.');
   assert.equal(factsSentence({}), '');
+});
+
+test('code changed with no test run is said out loud', () => {
+  assert.equal(factsSentence({ edits: 1 }), '1 edit. Tests not run.');
+  assert.equal(
+    factsSentence({ diff: { files: 2, insertions: 5, deletions: 0, commits: 0 } }),
+    '2 files, 5 lines. Tests not run.');
 });
 
 test('contradiction fires only on a success claim over red facts', () => {
@@ -63,6 +72,19 @@ test('contradiction fires only on a success claim over red facts', () => {
   assert.equal(contradiction(red, 'The tests are red; I need direction.'), '');
   assert.equal(contradiction({ tests: { status: 'pass' } }, 'All done and working.'), '');
   assert.equal(contradiction({}, 'Everything is complete.'), '');
+});
+
+test('negated claims and honest non-done intents never trip the alarm', () => {
+  const red = { tests: { status: 'fail' } };
+  // The user-reported class: honest failure wording that contains claim words.
+  assert.equal(contradiction(red, 'The build is still not working.'), '');
+  assert.equal(contradiction(red, "It isn't done yet; two tests are red."), '');
+  assert.equal(contradiction(red, 'I could not get it working.'), '');
+  // An honest intent label suppresses it regardless of wording.
+  assert.equal(contradiction(red, 'I fixed it successfully.', 'failed'), '');
+  assert.equal(contradiction(red, 'I fixed it successfully.', 'blocked'), '');
+  // A real claim still fires.
+  assert.match(contradiction(red, 'It is now working correctly.', 'done'), /claims success/);
 });
 
 test('a turn diff is the delta since the snapshot, not the whole tree', () => {
@@ -90,6 +112,22 @@ test('transcript facts: failing test run with parsed counts, edits counted', () 
   assert.equal(facts.tests.failed, 2);
   assert.equal(facts.edits, 1);
   assert.match(sentence, /Tests failing, 2 of 5\./);
+});
+
+test('committing during the turn no longer hides the work', () => {
+  const home = fakeHome();
+  const repo = gitRepo();
+  const g = args => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  snapshotTurn('tc', repo, home);
+  // The turn edits a file AND commits it, the way a well-behaved agent works.
+  writeFileSync(join(repo, 'c.txt'), 'new work\nmore work\n');
+  g(['add', '.']);
+  g(['commit', '-q', '-m', 'turn work']);
+  const { facts, sentence } = collectFacts('tc', { cwd: repo }, home, '');
+  assert.ok(facts.diff, 'committed work must still be reported');
+  assert.equal(facts.diff.commits, 1);
+  assert.ok(facts.diff.files >= 1, 'the committed file counts');
+  assert.match(sentence, /1 commit/);
 });
 
 test('collectFacts is fail-open on garbage inputs', () => {

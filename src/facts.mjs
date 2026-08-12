@@ -32,9 +32,13 @@ function git(cwd, args) {
   }
 }
 
-// file -> [insertions, deletions] for the working tree right now.
-function numstat(cwd) {
-  const out = git(cwd, ['diff', '--numstat', 'HEAD']);
+// file -> [insertions, deletions] for the working tree against a fixed base.
+// The base is the HEAD sha captured when the turn began, NOT the moving
+// symbolic HEAD: an agent that commits mid-turn moves HEAD, and diffing
+// against it would make the turn's own work vanish from the report exactly
+// when the agent finishes cleanly.
+function numstat(cwd, base = 'HEAD') {
+  const out = git(cwd, ['diff', '--numstat', base]);
   if (out == null) return null;
   const map = {};
   for (const line of out.split('\n')) {
@@ -54,7 +58,8 @@ export function snapshotTurn(sid, cwd, home) {
   try {
     const snap = { t0: Date.now(), cwd: cwd || '' };
     if (cwd && git(cwd, ['rev-parse', '--is-inside-work-tree'])) {
-      snap.numstat = numstat(cwd);
+      snap.headSha = (git(cwd, ['rev-parse', 'HEAD']) || '').trim() || null;
+      snap.numstat = numstat(cwd, snap.headSha || 'HEAD');
     }
     writeFileSync(join(stateDir(home), `turn.${sid || 'nosession'}.json`), JSON.stringify(snap));
   } catch { /* fail-open */ }
@@ -73,7 +78,8 @@ function loadTurn(sid, home) {
 
 function diffFacts(snap, cwd) {
   if (!cwd || !snap || !snap.numstat) return null;
-  const now = numstat(cwd);
+  const base = snap.headSha || 'HEAD';
+  const now = numstat(cwd, base);
   if (!now) return null;
   const before = snap.numstat;
   const files = [];
@@ -85,8 +91,21 @@ function diffFacts(snap, cwd) {
     if (i > 0) ins += i - (prev && prev[0] > 0 ? prev[0] : 0);
     if (d > 0) del += d - (prev ? prev[1] : 0);
   }
-  if (!files.length) return null;
-  return { files: files.length, names: files.slice(0, 3).map(f => basename(f)), insertions: Math.max(0, ins), deletions: Math.max(0, del) };
+  // Commits made during the turn are work too, and the reason the base is a
+  // fixed sha rather than the symbolic HEAD.
+  let commits = 0;
+  if (snap.headSha) {
+    const c = git(cwd, ['rev-list', '--count', `${snap.headSha}..HEAD`]);
+    if (c != null) commits = Number(c.trim()) || 0;
+  }
+  if (!files.length && !commits) return null;
+  return {
+    files: files.length,
+    names: files.slice(0, 3).map(f => basename(f)),
+    insertions: Math.max(0, ins),
+    deletions: Math.max(0, del),
+    commits,
+  };
 }
 
 // Transcript scan: the last test/build command of the turn and how it ended.
@@ -148,8 +167,8 @@ function parseCounts(text) {
   return {};
 }
 
-// Called by the stop hook. Returns { facts, sentence, contradiction, intent }.
-export function collectFacts(sid, payload, home, modelText) {
+// Called by the stop hook. Returns { facts, sentence, contradiction }.
+export function collectFacts(sid, payload, home, modelText, intent) {
   const started = Date.now();
   const facts = {};
   try {
@@ -171,7 +190,7 @@ export function collectFacts(sid, payload, home, modelText) {
   return {
     facts,
     sentence: factsSentence(facts),
-    contradiction: contradiction(facts, modelText),
+    contradiction: contradiction(facts, modelText, intent),
   };
 }
 
@@ -181,7 +200,11 @@ export function factsSentence(facts) {
   if (facts.diff) {
     const f = facts.diff;
     const lines = f.insertions + f.deletions;
-    parts.push(`${f.files} ${f.files === 1 ? 'file' : 'files'}${lines ? `, ${lines} lines` : ''}.`);
+    const bits = [];
+    if (f.commits) bits.push(`${f.commits} ${f.commits === 1 ? 'commit' : 'commits'}`);
+    if (f.files) bits.push(`${f.files} ${f.files === 1 ? 'file' : 'files'}`);
+    if (lines) bits.push(`${lines} lines`);
+    if (bits.length) parts.push(bits.join(', ') + '.');
   } else if (facts.edits) {
     parts.push(`${facts.edits} ${facts.edits === 1 ? 'edit' : 'edits'}.`);
   }
@@ -193,16 +216,29 @@ export function factsSentence(facts) {
     } else {
       parts.push('Tests passing.');
     }
+  } else if (facts.diff || facts.edits) {
+    // Code changed and the tests never ran: arguably the most valuable thing
+    // to hear from the next room, and cheap since both facts are known.
+    parts.push('Tests not run.');
   }
   if (facts.build && facts.build.status === 'fail') parts.push('Build failing.');
   return parts.join(' ');
 }
 
+// Negated claims must never read as success: "still not working" contains
+// "working", and a false contradiction alarm destroys trust faster than a
+// missed one.
+const NEGATED_CLAIMS = /\b(?:not|never|no longer|isn't|aren't|wasn't|won't|can't|cannot|don't|doesn't|didn't|stopped|without|far from)(?:\s+\w+){0,2}\s+(?:fixed|working|passing|done|complete|completed|successful|successfully)\b/gi;
+
 // P2-3: when the model claims success and the measurements disagree, say so.
-export function contradiction(facts, modelText) {
+// Only fires when the model's own intent says done: an honest failed or
+// blocked label is already the truth, whatever words surround it.
+export function contradiction(facts, modelText, intent = 'done') {
+  if (intent !== 'done') return '';
   const failing = (facts.tests && facts.tests.status === 'fail') || (facts.build && facts.build.status === 'fail');
   if (!failing) return '';
-  if (!SUCCESS_CLAIMS.test(String(modelText || ''))) return '';
+  const cleaned = String(modelText || '').replace(NEGATED_CLAIMS, '');
+  if (!SUCCESS_CLAIMS.test(cleaned)) return '';
   const what = facts.tests && facts.tests.status === 'fail' ? 'Tests failing' : 'Build failing';
   return `${what}, but the summary claims success.`;
 }

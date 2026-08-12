@@ -2,6 +2,43 @@
 
 All notable changes to agent-voice. Dates are UTC.
 
+## Unreleased
+
+### Fixed
+- **The shush-restart bug** (field-reported): stopping speech mid-playback
+  killed the player before the speaker, the speaker read that as a playback
+  failure, and the never-silent fallback chain re-spoke the whole text from
+  the beginning in a different voice. `shush` now writes a stop marker
+  before killing anything, and every speaker checks it before starting
+  audio, between streamed sentences, and before the native fallback: a
+  requested stop is never mistaken for a failure. An orphaned-player
+  backstop sweeps players still holding our audio files.
+- **Cross-session overlap**: a speaking lock (live-PID, staleness-checked)
+  now guarantees at most one session's words at a time; question/failed
+  turns queue for the floor up to 30 s, everything else yields to the
+  earcon. The rate-limit timestamp is recorded when speech starts, not when
+  it ends.
+- **Commit-blind diff facts**: the turn diff is now taken against the HEAD
+  sha captured when the turn began, so an agent that commits mid-turn no
+  longer has its work vanish from the spoken report; commits made during
+  the turn are counted and spoken.
+- **False contradiction alarms**: negated wording ("still not working") no
+  longer reads as a success claim, and the alarm only fires when the
+  model's own intent label is `done`.
+- Barge-in's process-identity check moved out of the hook's hot path into
+  the detached speaker (it cost ~0.5 s on Windows via CIM).
+- Per-session state files are garbage-collected after a week, at most one
+  sweep per day.
+
+### Added
+- "Tests not run." is spoken when code changed and no test runner ran: the
+  gap the model is least likely to volunteer.
+- `voice last` explains why the previous turn did or did not speak.
+- `voice snooze [mins]` mutes all audio everywhere for a while
+  (notifications still show); shown in `voice status`.
+- `voice pick`/`voice preview` explain themselves on plugin-only installs
+  instead of failing silently.
+
 ## 0.1.0 - 2026-08-12
 
 ### Added

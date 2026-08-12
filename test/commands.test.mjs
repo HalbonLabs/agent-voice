@@ -155,6 +155,37 @@ test('voice help covers every command', () => {
   }
 });
 
+test('voice snooze mutes, reports in status, and ends early', () => {
+  const home = fakeHome();
+  let r = run(home, 'voice snooze 45');
+  assert.match(r.lines[0], /muted everywhere for 45 min/);
+  r = run(home, 'voice status');
+  assert.ok(r.lines.some(l => /snooze/.test(l)), 'status shows the snooze');
+  r = run(home, 'voice snooze off');
+  assert.match(r.lines[0], /audio is back/);
+  r = run(home, 'voice snooze abc');
+  assert.match(r.lines[0], /say how long/);
+});
+
+test('voice last explains the previous decision, or says there is none', () => {
+  const home = fakeHome();
+  let r = run(home, 'voice last');
+  assert.match(r.lines[0], /nothing spoken or decided yet/);
+  writeFileSync(statePath(home, 'last-decision.json'), JSON.stringify({
+    ts: Date.now() - 5000, tag: 'other', intent: 'done', duration: 12,
+    reason: 'rate limited', wantedSpeech: false, spoke: false, text: 'the summary text',
+  }));
+  r = run(home, 'voice last');
+  assert.match(r.lines.join('\n'), /earcon only \(rate limited\)/);
+  assert.match(r.lines.join('\n'), /the summary text/);
+});
+
+test('voice pick without the picker script explains itself', () => {
+  const home = fakeHome(['engine=kokoro']);
+  const r = run(home, 'voice pick');
+  assert.match(r.lines[0], /picker is not installed here/);
+});
+
 test('voice stop cleans stray files and spares foreign pids', () => {
   const home = fakeHome([], {
     'speak.old.pid': '999999999',

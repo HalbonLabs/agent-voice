@@ -1,7 +1,7 @@
 // agent-voice UserPromptSubmit hook (all platforms).
 //   1. Intercepts the in-session `voice ...` commands via src/commands.mjs.
 //   2. Otherwise injects the <spoken> summary instruction when voice is active.
-import { writeFileSync, appendFileSync, existsSync } from 'fs';
+import { writeFileSync, appendFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { getField } from '../lib/json-get.mjs';
@@ -30,6 +30,28 @@ done otherwise.
 const agentFlag = (process.argv.find(a => a.startsWith('--agent=')) || '').slice('--agent='.length);
 const EVENT_NAME = agentFlag === 'gemini' ? 'BeforeAgent' : 'UserPromptSubmit';
 
+// Per-session state files otherwise accumulate forever, one set per session
+// id. A sweep of week-old files runs at most once a day, costing one readdir.
+const GC_INTERVAL_MS = 24 * 3600 * 1000;
+const GC_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+const GC_PATTERN = /^(on|off|text|engine|speed|voice|when|active|turn|speak|job|say)\./;
+
+function sweepStaleState(state) {
+  const stamp = join(state, 'last-gc');
+  try {
+    if (existsSync(stamp) && Date.now() - statSync(stamp).mtimeMs < GC_INTERVAL_MS) return;
+  } catch { /* fine */ }
+  try { writeFileSync(stamp, ''); } catch { /* fine */ }
+  let entries = [];
+  try { entries = readdirSync(state); } catch { return; }
+  for (const name of entries) {
+    if (!GC_PATTERN.test(name)) continue;
+    try {
+      if (Date.now() - statSync(join(state, name)).mtimeMs > GC_MAX_AGE_MS) unlinkSync(join(state, name));
+    } catch { /* fine */ }
+  }
+}
+
 let raw = '';
 process.stdin.on('data', c => raw += c).on('end', () => main(raw));
 
@@ -37,6 +59,7 @@ function main(payload) {
   const home = avHome();
   const state = ensureStateDir(home);
   const cfg = readConfig(home);
+  sweepStaleState(state);
 
   const sid = clampSid(getField(payload, 'session_id'));
   const prompt = getField(payload, 'prompt');

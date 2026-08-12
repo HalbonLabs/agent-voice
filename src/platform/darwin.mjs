@@ -47,6 +47,12 @@ export function killTree(pid) {
   try { process.kill(pid); } catch { /* already gone */ }
 }
 
+// Backstop for players orphaned by a kill race: matched by the state-dir
+// audio path on their command line, so an unrelated afplay survives.
+export function killOrphanPlayers(stateDirPath) {
+  spawnSync('pkill', ['-f', `${stateDirPath}/say\\.`], { stdio: 'ignore' });
+}
+
 // Desktop notification. Quotes are stripped rather than escaped: osascript
 // string escaping is a bug farm, and a notification does not need them.
 export function notify(title, body) {

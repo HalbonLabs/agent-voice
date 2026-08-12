@@ -45,6 +45,13 @@ this integration, so it ignores speed and `voice status` says so.
 - **Global default on/off:** Windows `~/.agent-voice/voice.cmd`; macOS
   `~/.agent-voice/voice.sh`. Sessions with no per-session setting follow it.
 
+## When it did not speak, and why
+
+`voice last` explains the previous turn's decision: spoke, earcon only, or
+suppressed, and the reason (rate limited, another session had the floor,
+snoozed, policy). `voice snooze [minutes]` mutes all audio everywhere for a
+while (default 30; notifications still show); `voice snooze off` ends it.
+
 ## Several sessions at once
 
 Audio is global, but the summary is not: keep `voice on` in the window you

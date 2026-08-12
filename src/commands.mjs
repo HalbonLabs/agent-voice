@@ -15,7 +15,7 @@ import {
 } from './config.mjs';
 import { platform } from './platform/index.mjs';
 import { stopAll } from './stop.mjs';
-import { whenMode, WHEN_MODES } from './policy.mjs';
+import { whenMode, WHEN_MODES, snoozeUntil, setSnooze } from './policy.mjs';
 
 const SPEED_MIN = 0.5;
 const SPEED_MAX = 2.0;
@@ -64,6 +64,8 @@ export function handleCommand(prompt, sid, home) {
       '  voice pick              browse voices with arrows and P, in a new window',
       '  voice speed             list speeds, then: voice speed 1.5',
       '  voice when              when to speak: always, problem, question, long, never',
+      '  voice snooze [mins]     mute all audio everywhere for a while (default 30)',
+      '  voice last              why the last turn did or did not speak',
       '  voice list              same as voice model, lists what is available',
       '  voice help              this list',
       '',
@@ -99,7 +101,41 @@ export function handleCommand(prompt, sid, home) {
     say(`  speed   ${s.speed}x (${s.speedFrom === 'session' ? 'this session' : 'default'}, 1.0 is normal)`);
     const w = whenMode(sid, home);
     say(`  when    ${w.mode} (${w.from === 'session' ? 'this session' : 'default'})`);
+    const snoozed = snoozeUntil(home);
+    if (Date.now() < snoozed) {
+      say(`  snooze  all audio muted for another ${Math.ceil((snoozed - Date.now()) / 60000)} min (voice snooze off to end)`);
+    }
     if (engine === 'elevenlabs') say('  note    ElevenLabs ignores speed; it has no rate control in this integration.');
+    return done();
+  }
+
+  if ((m = cmd.match(/^voice snooze\b(.*)$/))) {
+    const arg = m[1].trim();
+    if (arg === 'off' || arg === 'default') {
+      setSnooze(home, 0);
+      say('agent-voice: snooze ended; audio is back.');
+    } else {
+      const mins = arg ? parseInt(arg, 10) : 30;
+      if (!Number.isFinite(mins) || mins < 1 || mins > 480) {
+        say("agent-voice: say how long, in minutes: 'voice snooze 30'. End early with 'voice snooze off'.");
+      } else {
+        setSnooze(home, mins);
+        say(`agent-voice: all audio muted everywhere for ${mins} min. Notifications still show. 'voice snooze off' ends it early.`);
+      }
+    }
+    return done();
+  }
+
+  if (cmd === 'voice last') {
+    try {
+      const d = JSON.parse(readFileSync(join(p.state, 'last-decision.json'), 'utf8'));
+      const age = Math.round((Date.now() - d.ts) / 1000);
+      say(`agent-voice: last turn (${age}s ago, session ${d.tag}, intent ${d.intent}):`);
+      say(`  ${d.spoke ? 'spoke' : d.wantedSpeech ? 'wanted to speak but did not' : 'earcon only'} (${d.reason})`);
+      if (d.text) say(`  said/would say: ${d.text.length > 160 ? d.text.slice(0, 157) + '...' : d.text}`);
+    } catch {
+      say('agent-voice: nothing spoken or decided yet.');
+    }
     return done();
   }
 
@@ -135,9 +171,14 @@ export function handleCommand(prompt, sid, home) {
   }
 
   if (cmd === 'voice pick') {
+    const pickerScript = join(root, process.platform === 'win32' ? 'pick-voice.ps1' : 'pick-voice.sh');
     if (engine !== 'kokoro') {
       say('agent-voice: the picker only covers Kokoro, the one engine whose voices can be auditioned offline.');
       say(`  You are on '${engine}'. Switch with 'voice engine kokoro', or use 'voice model' for a list.`);
+    } else if (!existsSync(pickerScript)) {
+      // Plugin-only installs do not carry the picker scripts.
+      say('agent-voice: the picker is not installed here; run the full installer to get it,');
+      say("  or use 'voice model' and 'voice preview <n>' instead.");
     } else if (platform.openPicker(root, sid, engine)) {
       say('agent-voice: opened the voice picker in a new window. Arrows to move, P to hear, Enter to choose.');
     } else {
@@ -161,6 +202,8 @@ export function handleCommand(prompt, sid, home) {
       say("agent-voice: say which one, for example 'voice preview 9'. Type 'voice model' for the list.");
     } else if (!all.some(v => v.id === arg)) {
       say(`agent-voice: '${arg}' is not a Kokoro voice. Type 'voice model' to see the list.`);
+    } else if (!existsSync(join(root, process.platform === 'win32' ? 'pick-voice.ps1' : 'pick-voice.sh'))) {
+      say('agent-voice: previews need the full install (the preview player is not present here).');
     } else {
       platform.previewVoice(root, arg);
       say(`agent-voice: playing ${arg}. Switch to it with: voice model ${arg}`);

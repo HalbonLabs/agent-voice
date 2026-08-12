@@ -5,11 +5,16 @@ import { readdirSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { pathToFileURL } from 'url';
-import { stateDir } from './config.mjs';
+import { stateDir, markStopRequested } from './config.mjs';
 import { platform } from './platform/index.mjs';
 
 export function stopAll(home = homedir()) {
   const state = stateDir(home);
+  // The marker goes down FIRST: any speaker that survives the kills below
+  // (or is mid-race between losing its player and starting the fallback
+  // voice) sees it and goes quiet instead of re-speaking from the top in a
+  // different voice.
+  markStopRequested(home);
   let entries = [];
   try { entries = readdirSync(state); } catch { return; }
 
@@ -27,10 +32,16 @@ export function stopAll(home = homedir()) {
     try { unlinkSync(pidFile); } catch { /* fine */ }
   }
 
-  // Killing a speaker skips its own cleanup, so tidy the temp audio and any
-  // unread job files here rather than leaving a file per interrupted session.
+  // Players orphaned by an earlier race (their speaker died, they kept the
+  // audio device) are matched by the file they are playing, never by name
+  // alone, so an unrelated player survives (R-15).
+  if (platform.killOrphanPlayers) platform.killOrphanPlayers(state);
+
+  // Killing a speaker skips its own cleanup, so tidy the temp audio, any
+  // unread job files, and a stale speaking lock rather than leaving a file
+  // per interrupted session.
   for (const name of entries) {
-    if (/^say\..+\.(wav|mp3)$/.test(name) || /^job\..+\.json$/.test(name)) {
+    if (/^say\..+\.(wav|mp3)$/.test(name) || /^job\..+\.json$/.test(name) || name === 'speaking.lock') {
       try { unlinkSync(join(state, name)); } catch { /* fine */ }
     }
   }

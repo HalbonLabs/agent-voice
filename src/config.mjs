@@ -7,7 +7,7 @@
 // asked by the prompt hook (voice status), the stop hook (what to speak with),
 // and the commands, so they are answered in exactly one place.
 
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -83,6 +83,23 @@ export function sessionPaths(sid, home = homedir()) {
     mp3: join(state, `say.${tag}.mp3`),
     wav: join(state, `say.${tag}.wav`),
   };
+}
+
+// The stop marker: shush writes it before killing anything, and every speaker
+// checks it before starting audio, before each streamed sentence, and before
+// the native-voice fallback. Without it, killing a player mid-sound looks
+// exactly like a playback failure, and the never-silent chain "helpfully"
+// re-speaks the whole text in a different voice: the shush-restart bug.
+export function markStopRequested(home = homedir()) {
+  try { writeFileSync(join(stateDir(home), 'stop-marker'), String(Date.now())); } catch { /* fine */ }
+}
+export function stopRequestedSince(home, t0) {
+  try {
+    const ts = Number(readFileSync(join(stateDir(home), 'stop-marker'), 'utf8').trim());
+    return Number.isFinite(ts) && ts >= t0;
+  } catch {
+    return false;
+  }
 }
 
 function flag(path) {
