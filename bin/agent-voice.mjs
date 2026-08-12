@@ -1,6 +1,12 @@
 #!/usr/bin/env node
-// npx agent-voice install  (or uninstall). Runs the platform installer from
-// the package directory, so npm users never clone.
+// node bin/agent-voice.mjs install  (or uninstall). Runs the platform
+// installer from the package directory.
+//
+// This was written for an `npx agent-voice install` path that does not exist:
+// the bare name `agent-voice` on the public npm registry belongs to an
+// unrelated project by another author, so this package has never been
+// published under it and cannot be. The entry point still works from a clone,
+// and would work under a scoped name if this is ever published.
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';

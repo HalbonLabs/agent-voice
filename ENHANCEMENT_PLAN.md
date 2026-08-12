@@ -419,7 +419,7 @@ Git-clone-only means zero adoption regardless of quality. voicemode and echook a
 | Channel | Work | Why |
 |---|---|---|
 | **Claude Code plugin marketplace** | `.claude-plugin/plugin.json`, marketplace entry | Where the audience actually is. Do this first. |
-| **npm** | `npx agent-voice install` | Node is guaranteed present. Removes the clone step entirely. |
+| **npm** | Publish under a **scoped** name, e.g. `@halbonlabs/agent-voice`, then `npx @halbonlabs/agent-voice install` | Node is guaranteed present. Removes the clone step entirely. **The bare name `agent-voice` is taken** by an unrelated project (published Feb 2026, same command name, near-identical description), so the unscoped path is unavailable and actively unsafe to document. |
 | **Homebrew tap** | formula in `HalbonLabs/homebrew-tap` | Expected on macOS. |
 | **winget** | manifest | You are Windows-first. Own that. |
 | **GitHub Releases** | tagged, with a changelog and a checksum | Blocks REMEDIATION R-21 and R-22 otherwise. |

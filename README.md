@@ -43,13 +43,7 @@ Codex malformed-JSON workaround and the Kimi transcript recovery:
 You need the agent(s) already installed, which is where Node comes from.
 Python 3 is only needed for the edge-tts and Kokoro engines.
 
-The quickest path needs no clone:
-
-```
-npx agent-voice install
-```
-
-Or from a clone:
+Clone it, then run the installer for your platform:
 
 ```
 git clone https://github.com/HalbonLabs/agent-voice.git
@@ -62,6 +56,14 @@ On macOS: `bash install.sh`
 Claude Code users can also add it as a plugin (the repo carries a plugin
 manifest); the plugin runs with the built-in OS voice out of the box, and
 the installer adds the natural-voice engines.
+
+> **Not on npm.** There is no `npx agent-voice` install path, and you should
+> not try one. The bare name `agent-voice` on the public npm registry belongs
+> to an unrelated project by a different author, published in February 2026,
+> which describes itself in almost the same words and exposes the same command
+> name. Running `npx agent-voice` fetches and executes that package, not this
+> one. If this project is ever published it will be under a scoped name, and
+> this section will say so.
 
 The installer detects your agents, offers them as a checklist, asks which
 voice engine to use, wires the hooks in without touching anything else in

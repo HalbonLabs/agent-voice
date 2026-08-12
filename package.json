@@ -2,7 +2,7 @@
   "name": "agent-voice",
   "version": "0.1.0",
   "description": "Hear what your agent actually did: grounded, fact-checked spoken summaries of every turn, across six coding agents.",
-  "private": false,
+  "private": true,
   "type": "module",
   "license": "MIT",
   "repository": {

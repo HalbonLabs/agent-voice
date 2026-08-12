@@ -66,8 +66,11 @@ All notable changes to agent-voice. Dates are UTC.
   Codex and Kimi; Gemini CLI ships experimentally (documented open vendor
   bug); an Amp in-process shim ships unexercised. The roster is data
   (`data/agents.json`).
-- **Distribution**: Claude Code plugin manifest, `npx agent-voice install`,
-  and Homebrew/winget packaging templates.
+- **Distribution**: Claude Code plugin manifest, a `bin/agent-voice.mjs`
+  entry point runnable from a clone, and Homebrew/winget packaging templates.
+  **Not published to npm**, and `npx agent-voice` is not an install path:
+  that name on the public registry belongs to an unrelated project by another
+  author. Publishing would require a scoped name.
 
 ## Pre-0.1.0 remediation
 
