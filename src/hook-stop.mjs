@@ -9,9 +9,10 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 import { getField } from '../lib/json-get.mjs';
-import { extractSpoken } from '../lib/extract-spoken.mjs';
+import { extractSpokenWithIntent } from '../lib/extract-spoken.mjs';
 import { kimiLastText } from '../lib/kimi-last-text.mjs';
 import { avHome, ensureStateDir, clampSid, resolveSession, engineMeta, defaultVoice } from './config.mjs';
+import { collectFacts } from './facts.mjs';
 import { platform } from './platform/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -38,8 +39,26 @@ function main(payload) {
   }
   if (!msg.trim()) return;
 
-  const text = extractSpoken(msg);
-  if (!text) return;
+  const spoken = extractSpokenWithIntent(msg);
+  if (!spoken.text) return;
+
+  // Ground truth, computed independently of the model's self-report (P2).
+  // Facts first, deterministic and always true; the model supplies only the
+  // narrative clause; a contradiction is called out ahead of both.
+  const grounded = collectFacts(sid, {
+    cwd: getField(payload, 'cwd'),
+    transcript_path: getField(payload, 'transcript_path'),
+  }, home, spoken.text);
+
+  let intent = spoken.intent;
+  // Derive intent from facts where they disagree with the model's own label:
+  // red tests plus a "done" claim is a failure whatever the tag says (P3-1).
+  if (grounded.contradiction && intent === 'done') intent = 'failed';
+  if (!grounded.contradiction && intent === 'done'
+      && grounded.facts.tests && grounded.facts.tests.status === 'fail') intent = 'failed';
+
+  const text = [grounded.contradiction, grounded.sentence, spoken.text]
+    .filter(Boolean).join(' ');
 
   const p = s.paths;
 
@@ -60,6 +79,9 @@ function main(payload) {
     home,
     tag: p.tag,
     text,
+    intent,
+    duration: grounded.facts.duration || 0,
+    cwd: getField(payload, 'cwd'),
     engine: s.engine,
     voice: s.voice,
     speed: s.speed,

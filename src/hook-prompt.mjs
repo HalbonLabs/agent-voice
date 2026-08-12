@@ -1,19 +1,28 @@
 // agent-voice UserPromptSubmit hook (all platforms).
 //   1. Intercepts the in-session `voice ...` commands via src/commands.mjs.
 //   2. Otherwise injects the <spoken> summary instruction when voice is active.
-import { writeFileSync, appendFileSync } from 'fs';
+import { writeFileSync, appendFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { spawn } from 'child_process';
 import { getField } from '../lib/json-get.mjs';
-import { avHome, ensureStateDir, clampSid, sessionMode, readConfig } from './config.mjs';
+import { avHome, ensureStateDir, clampSid, sessionMode, readConfig, resolveSession, rootDir } from './config.mjs';
 import { handleCommand } from './commands.mjs';
+import { snapshotTurn } from './facts.mjs';
 
-// The contract injected each turn. P2-4 will replace this with the structured
-// intent version; until then it matches what the shell hooks injected.
-const CONTRACT = `Voice mode is active. End every response with a <spoken> block on its own line.
-Inside it: 2 to 3 sentences of plain prose. No markdown, no code, no file paths,
-no lists, no symbols. State only what changed since my last message and what
-decision I need to make. If nothing needs a decision, say what you did and stop.
-Written to be heard, not read. Everything above the block stays normal.`;
+// The structured contract (P2-4). The intent attribute drives the earcon and
+// the silence policy; forbidding the model from reporting metrics stops it
+// inventing numbers, since the facts are measured independently (P2-1) and
+// spoken first.
+const CONTRACT = `Voice mode is active. End every reply with, on its own line:
+<spoken intent="done|question|blocked|failed">
+2 to 3 sentences of plain prose, written to be heard, not read. No markdown,
+no code, no file paths, no lists, no symbols. Say what you decided or what you
+need from me, in plain words. Do NOT state file counts, line counts, or test
+results: those are measured independently and will be spoken for you. Do not
+claim success; say what you did. Pick the intent honestly: question if you
+need a decision, blocked if you cannot proceed, failed if it did not work,
+done otherwise.
+</spoken>`;
 
 let raw = '';
 process.stdin.on('data', c => raw += c).on('end', () => main(raw));
@@ -70,6 +79,22 @@ function main(payload) {
   }
 
   if (sessionMode(sid, home) !== 'off') {
+    // Remember what the tree looked like when the turn began, so the stop
+    // hook can report the turn's own changes and its duration (P2-1). Also
+    // mark this session as the most recently active one (P3-4).
+    snapshotTurn(sid, getField(payload, 'cwd'), home);
+    try { writeFileSync(join(state, `active.${sid || 'nosession'}`), String(Date.now())); } catch { /* fine */ }
+
+    // Pre-warm the Kokoro daemon while the model thinks, so synthesis is warm
+    // by the time the reply lands (P4-2). The daemon guards against
+    // duplicates itself, so a spurious spawn is harmless.
+    const s = resolveSession(sid, home);
+    const serve = join(rootDir(home), 'kokoro_serve.py');
+    if (s.engine === 'kokoro' && s.mode === 'on' && existsSync(serve)) {
+      const c = spawn(s.python, [serve, s.paths.state], { detached: true, stdio: 'ignore' });
+      c.unref();
+    }
+
     process.stdout.write(CONTRACT + '\n');
   }
 }

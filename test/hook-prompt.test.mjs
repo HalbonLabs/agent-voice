@@ -41,7 +41,8 @@ test('voice on when active injects the spoken contract on later prompts', () => 
   runHook(home, { session_id: 'p2', prompt: 'voice on' });
   const out = runHook(home, { session_id: 'p2', prompt: 'fix the tests please' });
   assert.match(out, /Voice mode is active/);
-  assert.match(out, /<spoken>/);
+  assert.match(out, /<spoken intent="done\|question\|blocked\|failed">/);
+  assert.match(out, /Do NOT state file counts/);
 });
 
 test('voice off means an ordinary prompt injects nothing', () => {
