@@ -413,10 +413,14 @@ if ($sid -and $cmd -match '^voice speed\b(.*)$') {
     Add-Out ("agent-voice: speed override cleared; back to $(Get-DefaultSpeed $eng)x")
   }
   else {
+    # Invariant culture, both parsing and writing: the default TryParse reads
+    # "1.5" as 15 on a de-DE machine, and a culture-formatted write would put
+    # "1,5" into the state file where every other reader expects a dot (R-17).
     $val = 0.0
-    if ([double]::TryParse($arg, [ref]$val) -and $val -ge $SPEED_MIN -and $val -le $SPEED_MAX) {
-      Set-Content -Path $spdFlag -Value $val -NoNewline
-      Add-Out ("agent-voice: speed for this session is now ${val}x (1.0 is normal)")
+    if ([double]::TryParse($arg, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$val) -and $val -ge $SPEED_MIN -and $val -le $SPEED_MAX) {
+      $valText = $val.ToString([Globalization.CultureInfo]::InvariantCulture)
+      Set-Content -Path $spdFlag -Value $valText -NoNewline
+      Add-Out ("agent-voice: speed for this session is now ${valText}x (1.0 is normal)")
     } else {
       Add-Out ("agent-voice: speed must be a number between $SPEED_MIN and $SPEED_MAX, for example 'voice speed 1.5'. Use 'voice speed default' to reset.")
     }

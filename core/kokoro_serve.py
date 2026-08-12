@@ -27,7 +27,6 @@ import time
 from pathlib import Path
 
 IDLE_TIMEOUT = 900     # 15 minutes with no requests, then exit
-STARTUP_GRACE = 180    # a lock younger than this means another daemon is loading
 MAX_REQUEST = 64 * 1024
 MAX_TEXT = 8 * 1024    # far beyond any spoken summary; bounds CPU on the single-threaded loop
 
@@ -73,8 +72,45 @@ def daemon_alive(state):
         return False
 
 
+def pid_alive(pid):
+    """Is a process with this PID still running? Never signals anything: on
+    Windows os.kill would TerminateProcess for any signal other than the two
+    console events, so a handle query is used instead."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def take_lock(state):
-    """Single-daemon guard. True if we may proceed to load the model."""
+    """Single-daemon guard. True if we may proceed to load the model.
+
+    The lock records its holder's PID, and staleness is the holder being gone,
+    not an mtime age (R-19): the old startup-grace window meant a killed
+    daemon's lock blocked the next daemon for up to 180 s, while this takes
+    over immediately. A holder that is still alive always wins, which is what
+    keeps two daemons from loading during the one-load window."""
     lock = state / "kokoro.lock"
     for _ in range(2):
         try:
@@ -84,13 +120,13 @@ def take_lock(state):
             return True
         except FileExistsError:
             try:
-                age = time.time() - lock.stat().st_mtime
-            except OSError:
-                continue          # vanished under us, try again
-            if age < STARTUP_GRACE:
-                return False      # another daemon is starting up; let it win
+                holder = int(lock.read_text(encoding="ascii").strip() or "0")
+            except (OSError, ValueError):
+                holder = 0
+            if holder and pid_alive(holder):
+                return False      # a live daemon is loading or serving; let it win
             try:
-                lock.unlink()     # stale lock from a crashed daemon; take over
+                lock.unlink()     # holder is gone; take over now
             except OSError:
                 return False
     return False

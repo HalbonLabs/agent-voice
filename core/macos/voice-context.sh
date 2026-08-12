@@ -344,13 +344,16 @@ if [ -n "$sid" ]; then
       return 2 ;;
     "voice on")
       : > "$on_flag"; rm -f "$off_flag" "$text_flag"
-      echo "agent-voice: ON (summary + speech) for this session." >&2; exit 2 ;;
+      # return, not exit: this function only behaves when run in a subshell,
+      # and an exit here would silently swallow the prompt if a refactor ever
+      # calls it directly (R-18).
+      echo "agent-voice: ON (summary + speech) for this session." >&2; return 2 ;;
     "voice text")
       : > "$on_flag"; : > "$text_flag"; rm -f "$off_flag"
-      echo "agent-voice: TEXT-ONLY summary (no audio) for this session." >&2; exit 2 ;;
+      echo "agent-voice: TEXT-ONLY summary (no audio) for this session." >&2; return 2 ;;
     "voice off")
       rm -f "$on_flag" "$text_flag"; : > "$off_flag"
-      echo "agent-voice: OFF for this session." >&2; exit 2 ;;
+      echo "agent-voice: OFF for this session." >&2; return 2 ;;
     "voice status")
       if [ -f "$text_flag" ]; then st="TEXT-ONLY (summary, no audio)"
       elif [ -f "$on_flag" ]; then st="ON (summary + speech)"

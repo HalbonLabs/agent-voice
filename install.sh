@@ -192,6 +192,11 @@ install_mac_quick_action() {
   qa="$HOME/Library/Services/Stop agent-voice.workflow"
   mkdir -p "$qa/Contents" 2>/dev/null || return 0
 
+  # $TARGET is interpolated into XML below; a home directory containing &, <,
+  # or a quote would otherwise produce a malformed workflow that fails with no
+  # error shown (R-20).
+  TARGET_XML="$(printf '%s' "$TARGET" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g")"
+
   cat > "$qa/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -242,7 +247,7 @@ PLIST
         <key>ActionParameters</key>
         <dict>
           <key>COMMAND_STRING</key>
-          <string>bash "$TARGET/shush.sh"</string>
+          <string>bash "$TARGET_XML/shush.sh"</string>
           <key>CheckedForUserDefaultShell</key>
           <true/>
           <key>inputMethod</key>
@@ -397,6 +402,7 @@ case "$choice" in
           # resolved to bare python3; point previews at the venv we just built.
           pick_py="$vpy"
           select_voice "bf_emma"
+          # shellcheck disable=SC2154  # chosen_voice is set by select_voice in the sourced pick-voice.sh
           kv="$chosen_voice"
         else
           echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"

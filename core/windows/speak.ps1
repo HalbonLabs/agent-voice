@@ -192,12 +192,13 @@ if ($sid) {
   $spdFlag = Join-Path $state "speed.$sid"
   if (Test-Path $spdFlag) {
     $v = 0.0
-    if ([double]::TryParse((Get-Content $spdFlag -Raw).Trim(), [ref]$v)) { $speedMul = $v }
+    # Invariant culture: the current-culture default reads "1.5" as 15 on de-DE (R-17).
+    if ([double]::TryParse((Get-Content $spdFlag -Raw).Trim(), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $speedMul = $v }
   }
 }
 if ($null -eq $speedMul -and $cfg.voice_speed) {
   $v = 0.0
-  if ([double]::TryParse($cfg.voice_speed, [ref]$v)) { $speedMul = $v }
+  if ([double]::TryParse($cfg.voice_speed, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $speedMul = $v }
 }
 
 # Kimi Code's Stop payload has no last_assistant_message at all, so recover the

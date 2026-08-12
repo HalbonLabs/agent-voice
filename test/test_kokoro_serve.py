@@ -6,6 +6,7 @@ the stdlib: kokoro_serve defers the kokoro import until main(), so importing
 the module for testing needs no ML dependencies.
 """
 
+import os
 import socket
 import sys
 import tempfile
@@ -91,6 +92,37 @@ class PortFile(unittest.TestCase):
         self.assertIsNone(kokoro_serve.read_port_file(state))
         (state / "kokoro.port").write_text("not a port line at all", encoding="utf-8")
         self.assertIsNone(kokoro_serve.read_port_file(state))
+
+
+class TakeLock(unittest.TestCase):
+    def setUp(self):
+        self.state = Path(tempfile.mkdtemp(prefix="av-state-"))
+        self.lock = self.state / "kokoro.lock"
+
+    def test_free_lock_is_taken(self):
+        self.assertTrue(kokoro_serve.take_lock(self.state))
+        self.assertEqual(self.lock.read_text(encoding="ascii"), str(os.getpid()))
+
+    def test_live_holder_wins(self):
+        # Our own PID is certainly alive.
+        self.lock.write_text(str(os.getpid()), encoding="ascii")
+        self.assertFalse(kokoro_serve.take_lock(self.state))
+
+    def test_dead_holder_is_taken_over_immediately(self):
+        # R-19: no 180 s grace; a gone holder means takeover on the spot.
+        self.lock.write_text("999999999", encoding="ascii")
+        self.assertTrue(kokoro_serve.take_lock(self.state))
+        self.assertEqual(self.lock.read_text(encoding="ascii"), str(os.getpid()))
+
+    def test_garbage_lock_is_taken_over(self):
+        self.lock.write_text("not a pid", encoding="ascii")
+        self.assertTrue(kokoro_serve.take_lock(self.state))
+
+    def test_pid_alive(self):
+        self.assertTrue(kokoro_serve.pid_alive(os.getpid()))
+        self.assertFalse(kokoro_serve.pid_alive(999999999))
+        self.assertFalse(kokoro_serve.pid_alive(0))
+        self.assertFalse(kokoro_serve.pid_alive(-1))
 
 
 class FakeEngine:
