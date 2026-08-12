@@ -120,10 +120,18 @@ $mp3     = Join-Path $state "say.$tag.mp3"
 $wav     = Join-Path $state "say.$tag.wav"
 $alias   = "ccvoice$PID"
 
-# Cut off this session's previous turn if it is still speaking.
+# Cut off this session's previous turn if it is still speaking. A PID alone is
+# not proof: after PID reuse it can belong to an unrelated process, so only
+# signal it if its command line shows it is one of our speak processes.
 if (Test-Path $pidFile) {
-  $old = Get-Content $pidFile
-  if ($old) { Stop-Process -Id $old -Force }
+  $old = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($old -match '^\d+$') {
+    $oldCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$old" -ErrorAction SilentlyContinue).CommandLine
+    if ($oldCmd -and $oldCmd -match 'speak\.ps1') {
+      Stop-Process -Id $old -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 $PID | Set-Content $pidFile
 

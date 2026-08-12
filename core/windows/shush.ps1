@@ -2,10 +2,17 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $state = Join-Path $env:USERPROFILE '.agent-voice\state'
 
-# Kill every tracked speak process (one speak.<sid>.pid per session).
+# Kill every tracked speak process (one speak.<sid>.pid per session), but only
+# after checking the PID is still one of ours: after PID reuse it could belong
+# to an unrelated process.
 Get-ChildItem (Join-Path $state 'speak.*.pid') -ErrorAction SilentlyContinue | ForEach-Object {
-  $p = Get-Content $_.FullName
-  if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
+  $p = (Get-Content $_.FullName -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($p -match '^\d+$') {
+    $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue).CommandLine
+    if ($cmd -and $cmd -match 'speak\.ps1') {
+      Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
+    }
+  }
   Remove-Item $_.FullName -ErrorAction SilentlyContinue
 }
 

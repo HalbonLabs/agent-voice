@@ -75,12 +75,25 @@ pidfile="$STATE/speak.$tag.pid"
 mp3="$STATE/say.$tag.mp3"
 wav="$STATE/say.$tag.wav"
 
-# Cut off this session's previous turn if still speaking.
-[ -f "$pidfile" ] && kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null
+# Cut off this session's previous turn if still speaking. A PID alone is not
+# proof of anything: after PID reuse it can belong to an unrelated process, so
+# verify it is one of our speak subshells before signalling. Kill its children
+# first (afplay/say/python), because killing only the subshell leaves the
+# player talking.
+if [ -f "$pidfile" ]; then
+  old="$(cat "$pidfile" 2>/dev/null)"
+  case "$old" in
+    ''|*[!0-9]*) ;;
+    *) if ps -p "$old" -o command= 2>/dev/null | grep -q 'speak\.sh'; then
+         pkill -P "$old" 2>/dev/null
+         kill "$old" 2>/dev/null
+       fi ;;
+  esac
+  rm -f "$pidfile"
+fi
 
 # Do synthesis + playback in the background so the hook returns at once.
 (
-  echo $$ > "$pidfile"
   spoke=0
   rm -f "$mp3" "$wav"
 
@@ -126,6 +139,9 @@ wav="$STATE/say.$tag.wav"
 
   rm -f "$mp3" "$wav" "$pidfile"
 ) >/dev/null 2>&1 &
+# The subshell's PID via $!, not $$ inside it: $$ in a subshell is still the
+# invoking shell's PID, and $BASHPID does not exist in the bash 3.2 macOS ships.
+echo $! > "$pidfile"
 disown 2>/dev/null
 
 exit 0

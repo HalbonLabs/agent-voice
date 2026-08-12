@@ -4,7 +4,16 @@ STATE="$HOME/.agent-voice/state"
 
 for f in "$STATE"/speak.*.pid; do
   [ -f "$f" ] || continue
-  kill "$(cat "$f" 2>/dev/null)" 2>/dev/null
+  old="$(cat "$f" 2>/dev/null)"
+  # Verify the PID is still one of our speak subshells before signalling; after
+  # PID reuse it could be anything. Children first, so the player stops too.
+  case "$old" in
+    ''|*[!0-9]*) ;;
+    *) if ps -p "$old" -o command= 2>/dev/null | grep -q 'speak\.sh'; then
+         pkill -P "$old" 2>/dev/null
+         kill "$old" 2>/dev/null
+       fi ;;
+  esac
   rm -f "$f"
 done
 
