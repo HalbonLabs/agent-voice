@@ -45,7 +45,7 @@ try {
     let earconWait = null;
     if (cfg.voice_earcons !== '0') {
       const earcon = dataFile(join('earcons', `${job.intent || 'done'}.wav`));
-      if (existsSync(earcon)) earconWait = platform.playAsync(earcon);
+      if (existsSync(earcon)) earconWait = platform.playAsync(earcon, job.python);
     }
     if (decision.speech) {
       job.text = decision.prefix + job.text;

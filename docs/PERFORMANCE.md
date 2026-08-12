@@ -1,5 +1,23 @@
 # Performance
 
+## Time to first sound
+
+The intent earcon starts the moment the detached speaker wakes and plays
+while synthesis runs, so the first audible signal does not wait for the
+voice. Measured on Windows (method: Measure-Command around each stage):
+
+- Stop hook returns: ~100 ms
+- earcon audible: ~420 ms after the hook fired (node child ~80 ms, then
+  python winsound needs ~240 ms of startup and device-open before sound;
+  the PowerShell SoundPlayer alternative costs ~1 s, which is why python
+  is preferred with PowerShell as the fallback)
+- first spoken word (Kokoro, warm daemon): one short sentence's synthesis
+  after that, because synthesis is streamed sentence by sentence and the
+  facts-first template makes the first sentence short by construction
+
+The plan's 250 ms earcon target is not quite reached on this hardware; the
+remaining cost is audio-device open latency, not process startup.
+
 ## Synthesis times
 
 Measured on CPU with torch 2.13, the same method for each engine:

@@ -29,12 +29,49 @@ function speakEdge(job) {
   return r.status === 0 && producedAudio(job.mp3) && platform.play(job.mp3);
 }
 
-function speakKokoro(job) {
+// Conservative sentence split; anything unsplittable stays one utterance.
+function splitSentences(text) {
+  const parts = String(text).match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [text];
+  return parts.map(s => s.trim()).filter(Boolean);
+}
+
+// Streaming synthesis (P4-1): synthesise sentence 1, start playing it, and
+// synthesise the rest while it plays. The facts-first template makes the
+// first sentence short by construction, so perceived latency is one short
+// synthesis, not the whole utterance's.
+async function speakKokoro(job) {
   const script = join(rootDir(job.home), 'kokoro-tts.py');
   if (!existsSync(script)) return false;
-  const r = spawnSync(job.python, [script, job.wav, job.voice, String(job.speed)],
-    { input: job.text, stdio: ['pipe', 'ignore', 'ignore'] });
-  return r.status === 0 && producedAudio(job.wav) && platform.play(job.wav);
+
+  const synth = (text, out) => {
+    const r = spawnSync(job.python, [script, out, job.voice, String(job.speed)],
+      { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+    return r.status === 0 && producedAudio(out);
+  };
+
+  const sentences = splitSentences(job.text);
+  if (sentences.length <= 1) {
+    return synth(job.text, job.wav) && platform.play(job.wav);
+  }
+
+  let playing = null;
+  let spokeAny = false;
+  for (let i = 0; i < sentences.length; i++) {
+    const wavPath = job.wav.replace(/\.wav$/, `.${i}.wav`);
+    const ok = synth(sentences[i], wavPath);
+    if (!ok) {
+      // Mid-stream failure: finish the remaining words with the native voice
+      // rather than re-speaking from the start or going quiet.
+      if (playing) await playing;
+      platform.speakNative(sentences.slice(i).join(' '), { speed: job.speed, voice: job.nativeVoice });
+      return true;
+    }
+    if (playing) await playing;
+    playing = platform.playAsync(wavPath, job.python).then(done => { cleanup(wavPath); return done; });
+    spokeAny = true;
+  }
+  if (playing) await playing;
+  return spokeAny;
 }
 
 async function speakEleven(job) {
@@ -80,7 +117,7 @@ export async function speak(job) {
   let spoke = false;
   try {
     if (job.engine === 'edge') spoke = speakEdge(job);
-    else if (job.engine === 'kokoro') spoke = speakKokoro(job);
+    else if (job.engine === 'kokoro') spoke = await speakKokoro(job);
     else if (job.engine === 'elevenlabs') spoke = await speakEleven(job);
   } catch {
     spoke = false;

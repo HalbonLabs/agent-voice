@@ -29,17 +29,28 @@ export function play(file) {
     } catch { exit 1 }`);
 }
 
-// Non-blocking playback: resolves when the audio ends. Used for the earcon,
-// which plays while synthesis runs.
-export function playAsync(file) {
-  const esc = file.replace(/'/g, "''");
-  return new Promise(resolve => {
+// Non-blocking WAV playback: resolves when the audio ends. Used for the
+// earcon and the streamed Kokoro sentences. Prefers python's stdlib winsound
+// (~100 ms to first sound) over a PowerShell SoundPlayer child (~600 ms of
+// startup before any audio); falls back if python is absent or fails.
+export function playAsync(file, python) {
+  const viaPowershell = resolve => {
+    const esc = file.replace(/'/g, "''");
     const c = spawn('powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command',
        `try { $p = New-Object System.Media.SoundPlayer '${esc}'; $p.PlaySync(); $p.Dispose() } catch {}`],
       { stdio: 'ignore', windowsHide: true });
     c.on('exit', () => resolve(true));
     c.on('error', () => resolve(false));
+  };
+  return new Promise(resolve => {
+    if (!python) return viaPowershell(resolve);
+    const c = spawn(python,
+      ['-c', 'import sys, winsound; winsound.PlaySound(sys.argv[1], winsound.SND_FILENAME)', file],
+      { stdio: 'ignore', windowsHide: true });
+    let errored = false;
+    c.on('error', () => { errored = true; viaPowershell(resolve); });
+    c.on('exit', code => { if (errored) return; if (code === 0) resolve(true); else viaPowershell(resolve); });
   });
 }
 
