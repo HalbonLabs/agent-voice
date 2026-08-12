@@ -48,18 +48,24 @@ echo "Installed scripts to $TARGET"
 
 # Choose agents. Detect what is actually on this machine, and what is already
 # wired up, so the list offers real choices instead of three names to recognise.
-KEYS="claude codex kimi"
-name_of()      { case "$1" in claude) echo "Claude Code";; codex) echo "Codex CLI";; kimi) echo "Kimi Code CLI";; esac; }
+KEYS="claude codex kimi qwen droid goose"
+name_of()      { case "$1" in claude) echo "Claude Code";; codex) echo "Codex CLI";; kimi) echo "Kimi Code CLI";; qwen) echo "Qwen Code";; droid) echo "Droid (Factory)";; goose) echo "Goose";; esac; }
 note_of()      { case "$1" in
                    claude) echo "fully supported (summary + voice)";;
                    codex)  echo "fully supported (summary + voice)";;
                    kimi)   echo "supported (summary + voice) via its session transcript";;
+                   qwen)   echo "supported (summary + voice)";;
+                   droid)  echo "supported (voice via its session transcript)";;
+                   goose)  echo "voice output only (no per-turn summary injection)";;
                  esac; }
-dir_of()       { case "$1" in claude) echo "$HOME/.claude";; codex) echo "$HOME/.codex";; kimi) echo "$HOME/.kimi-code";; esac; }
+dir_of()       { case "$1" in claude) echo "$HOME/.claude";; codex) echo "$HOME/.codex";; kimi) echo "$HOME/.kimi-code";; qwen) echo "$HOME/.qwen";; droid) echo "$HOME/.factory";; goose) echo "$HOME/.agents";; esac; }
 cfg_of()       { case "$1" in
                    claude) echo "$HOME/.claude/settings.json";;
                    codex)  echo "$HOME/.codex/hooks.json";;
                    kimi)   echo "$HOME/.kimi-code/config.toml";;
+                   qwen)   echo "$HOME/.qwen/settings.json";;
+                   droid)  echo "$HOME/.factory/hooks.json";;
+                   goose)  echo "$HOME/.agents/plugins/agent-voice/hooks/hooks.json";;
                  esac; }
 # Installed means the command is runnable, nothing weaker. The config directory
 # is NOT evidence: hooks only ever fire from inside a running agent, so an agent
@@ -84,7 +90,7 @@ status_tag_of() {
 }
 
 # Pre-tick anything already set up, plus Claude when it is genuinely present.
-sel_claude=0; sel_codex=0; sel_kimi=0
+sel_claude=0; sel_codex=0; sel_kimi=0; sel_qwen=0; sel_droid=0; sel_goose=0
 for k in $KEYS; do
   if is_registered "$k" || { [ "$k" = "claude" ] && is_installed "$k"; }; then eval "sel_$k=1"; fi
 done
@@ -486,6 +492,7 @@ case "$choice" in
         # until below, so without this the previews resolve bare python3.
         PICK_PY="$PYX" export PICK_PY
         select_voice "bf_emma"
+        # shellcheck disable=SC2154  # chosen_voice is set by select_voice in the sourced pick-voice.sh
         kv="$chosen_voice"
       else
         echo "Kokoro could not synthesise yet. Voice will use the basic 'say' voice until this is fixed;"

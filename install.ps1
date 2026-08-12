@@ -42,7 +42,10 @@ function Get-Agents {
   $defs = @(
     @{ Key='claude'; Name='Claude Code';   Note='fully supported (summary + voice)';                            Dir='.claude';    Cfg='.claude\settings.json' },
     @{ Key='codex';  Name='Codex CLI';     Note='fully supported (summary + voice)'                            ;        Dir='.codex';     Cfg='.codex\hooks.json' },
-    @{ Key='kimi';   Name='Kimi Code CLI'; Note='supported (summary + voice) via its session transcript';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' }
+    @{ Key='kimi';   Name='Kimi Code CLI'; Note='supported (summary + voice) via its session transcript';            Dir='.kimi-code'; Cfg='.kimi-code\config.toml' },
+    @{ Key='qwen';   Name='Qwen Code';     Note='supported (summary + voice)';                                       Dir='.qwen';      Cfg='.qwen\settings.json' },
+    @{ Key='droid';  Name='Droid (Factory)'; Note='supported (voice via its session transcript)';                    Dir='.factory';   Cfg='.factory\hooks.json' },
+    @{ Key='goose';  Name='Goose';         Note='voice output only (no per-turn summary injection)';                 Dir='.agents';    Cfg='.agents\plugins\agent-voice\hooks\hooks.json' }
   )
   foreach ($d in $defs) {
     $cfgPath = Join-Path $h $d.Cfg

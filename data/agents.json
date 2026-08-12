@@ -1,0 +1,77 @@
+{
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "note": "fully supported (summary + voice)",
+      "config": [".claude", "settings.json"],
+      "style": "argv",
+      "events": { "prompt": "UserPromptSubmit", "stop": "Stop" },
+      "detectDir": ".claude",
+      "detectCmd": "claude"
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "note": "fully supported (summary + voice)",
+      "config": [".codex", "hooks.json"],
+      "style": "single",
+      "events": { "prompt": "UserPromptSubmit", "stop": "Stop" },
+      "detectDir": ".codex",
+      "detectCmd": "codex"
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi Code CLI",
+      "note": "supported (summary + voice) via its session transcript",
+      "config": [".kimi-code", "config.toml"],
+      "style": "toml",
+      "events": { "prompt": "UserPromptSubmit", "stop": "Stop" },
+      "detectDir": ".kimi-code",
+      "detectCmd": "kimi"
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen Code",
+      "note": "supported (summary + voice); config is a near-clone of Claude Code's",
+      "config": [".qwen", "settings.json"],
+      "style": "argv",
+      "events": { "prompt": "UserPromptSubmit", "stop": "Stop" },
+      "detectDir": ".qwen",
+      "detectCmd": "qwen"
+    },
+    {
+      "id": "droid",
+      "name": "Droid (Factory)",
+      "note": "supported; reply text recovered from its session transcript",
+      "config": [".factory", "hooks.json"],
+      "style": "single",
+      "events": { "prompt": "UserPromptSubmit", "stop": "Stop" },
+      "detectDir": ".factory",
+      "detectCmd": "droid"
+    },
+    {
+      "id": "goose",
+      "name": "Goose",
+      "note": "voice output only; Goose has no per-turn prompt injection",
+      "config": [".agents", "plugins", "agent-voice", "hooks", "hooks.json"],
+      "style": "argv",
+      "events": { "stop": "Stop" },
+      "promptHook": false,
+      "detectDir": ".agents",
+      "detectCmd": "goose"
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "note": "experimental: AfterAgent has an open no-fire bug (google-gemini/gemini-cli#27712)",
+      "config": [".gemini", "settings.json"],
+      "style": "argv",
+      "events": { "prompt": "BeforeAgent", "stop": "AfterAgent" },
+      "agentFlag": "gemini",
+      "experimental": true,
+      "detectDir": ".gemini",
+      "detectCmd": "gemini"
+    }
+  ]
+}

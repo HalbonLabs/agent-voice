@@ -24,6 +24,12 @@ need a decision, blocked if you cannot proceed, failed if it did not work,
 done otherwise.
 </spoken>`;
 
+// --agent=<id> marks agents whose injection protocol differs from Claude
+// Code's. Gemini injects ONLY via JSON stdout with a BeforeAgent event name;
+// its plain stdout becomes a user-visible systemMessage instead of context.
+const agentFlag = (process.argv.find(a => a.startsWith('--agent=')) || '').slice('--agent='.length);
+const EVENT_NAME = agentFlag === 'gemini' ? 'BeforeAgent' : 'UserPromptSubmit';
+
 let raw = '';
 process.stdin.on('data', c => raw += c).on('end', () => main(raw));
 
@@ -68,7 +74,7 @@ function main(payload) {
       '<spoken> block.\n\n' + text;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: 'UserPromptSubmit',
+        hookEventName: EVENT_NAME,
         additionalContext: instruction,
       },
     }) + '\n');
@@ -95,6 +101,12 @@ function main(payload) {
       c.unref();
     }
 
-    process.stdout.write(CONTRACT + '\n');
+    if (agentFlag === 'gemini') {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: EVENT_NAME, additionalContext: CONTRACT },
+      }) + '\n');
+    } else {
+      process.stdout.write(CONTRACT + '\n');
+    }
   }
 }

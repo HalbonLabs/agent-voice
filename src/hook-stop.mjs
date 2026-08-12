@@ -11,6 +11,7 @@ import { join, dirname } from 'path';
 import { getField } from '../lib/json-get.mjs';
 import { extractSpokenWithIntent } from '../lib/extract-spoken.mjs';
 import { kimiLastText } from '../lib/kimi-last-text.mjs';
+import { transcriptLastText } from '../lib/transcript-last-text.mjs';
 import { avHome, ensureStateDir, clampSid, resolveSession, engineMeta, defaultVoice } from './config.mjs';
 import { collectFacts } from './facts.mjs';
 import { platform } from './platform/index.mjs';
@@ -26,16 +27,22 @@ function main(payload) {
   ensureStateDir(home);
 
   const sid = clampSid(getField(payload, 'session_id'));
-  let msg = getField(payload, 'last_assistant_message');
+  // last_assistant_message is the common case (Claude, Codex, Qwen, Goose);
+  // prompt_response is Gemini's name for the same thing.
+  let msg = getField(payload, 'last_assistant_message') || getField(payload, 'prompt_response');
 
   const s = resolveSession(sid, home);
   if (s.mode !== 'on') return;
 
-  // Kimi Code's Stop payload has no last_assistant_message at all, so recover
-  // the reply from its session transcript. Only runs when the field is
-  // genuinely absent, which leaves Claude Code and Codex untouched.
+  // Some agents put nothing in the payload. Kimi's reply is recovered from
+  // its session transcript by shape; Droid (and anything similar) points at
+  // a transcript_path, which the generic reader handles. Both only run when
+  // the field is genuinely absent, leaving the inline-payload agents untouched.
   if (!msg.trim() && sid.startsWith('session_')) {
     msg = kimiLastText(sid, home);
+  }
+  if (!msg.trim()) {
+    msg = transcriptLastText(getField(payload, 'transcript_path'));
   }
   if (!msg.trim()) return;
 
