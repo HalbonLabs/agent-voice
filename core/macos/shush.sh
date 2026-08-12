@@ -17,8 +17,9 @@ for f in "$STATE"/speak.*.pid; do
   rm -f "$f"
 done
 
-# Belt and braces: stop the players agent-voice uses.
-killall afplay say 2>/dev/null
+# Backstop for players orphaned by a kill above: match only processes playing
+# OUR audio files, never every afplay and say the user has running (R-15).
+pkill -f "$STATE/say\." 2>/dev/null
 
 # Killing the speak process skips its own cleanup, so tidy up the temp audio here
 # rather than leaving a file per interrupted session behind.

@@ -225,8 +225,15 @@ $cfg = @()
 switch ($choice) {
   '2' {
     $sec = Read-Host 'Paste your ElevenLabs API key' -AsSecureString
-    $key = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-    Set-Content -Path (Join-Path $target 'elevenlabs-key') -Value $key -NoNewline
+    # Free the BSTR after copying it out, so the plaintext key does not linger
+    # at a known process-memory address (R-12).
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try     { $key = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    $keyFile = Join-Path $target 'elevenlabs-key'
+    Set-Content -Path $keyFile -Value $key -NoNewline
+    # Owner-only ACL, matching the chmod 600 the macOS installer does.
+    icacls $keyFile /inheritance:r /grant:r "*${me}:F" | Out-Null
     $vid = Read-Host 'Voice ID (Enter for default British male "George")'
     if ([string]::IsNullOrWhiteSpace($vid)) { $vid = 'JBFqnCBsd6RMkjVDRZzb' }
     $cfg += 'engine=elevenlabs'; $cfg += "eleven_voice=$vid"; $cfg += 'eleven_model=eleven_flash_v2_5'

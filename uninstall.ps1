@@ -2,9 +2,22 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $target = Join-Path $env:USERPROFILE '.agent-voice'
 
-# Stop the Kokoro daemon first, if one is resident, so its memory is freed now.
+# Stop the Kokoro daemon first, if one is resident, so its ~1.7 GB is freed
+# now rather than after the idle timeout. Use the interpreter the config
+# recorded, not bare "python": the dependencies live in the private venv, a
+# bare interpreter cannot import kokoro, and the quit would silently no-op,
+# leaving the daemon resident after the user thinks they uninstalled (R-16).
 $serve = Join-Path $target 'kokoro_serve.py'
-if (Test-Path $serve) { python $serve (Join-Path $target 'state') --quit 2>$null }
+if (Test-Path $serve) {
+  $py = 'python'
+  $cfgFile = Join-Path $target 'config'
+  if (Test-Path $cfgFile) {
+    Get-Content $cfgFile | ForEach-Object {
+      if ($_ -match '^\s*(python_cmd|kokoro_python)\s*=\s*(.+)$') { $py = $matches[2].Trim() }
+    }
+  }
+  & $py $serve (Join-Path $target 'state') --quit 2>$null
+}
 
 $reg = Join-Path $target 'lib\register.mjs'
 if (Test-Path $reg) {

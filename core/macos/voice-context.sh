@@ -59,6 +59,13 @@ RAW="$(cat)"
 sid="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" session_id)"
 prompt="$(printf '%s' "$RAW" | node "$ROOT/lib/json-get.mjs" prompt)"
 
+# The session id lands in file paths and an osascript string, so clamp anything
+# outside [A-Za-z0-9_-] to the shared-state id rather than letting a hostile
+# payload traverse with ../ (R-13). Agents send UUIDs; real ids pass untouched.
+case "$sid" in
+  *[!A-Za-z0-9_-]*) sid="nosession" ;;
+esac
+
 global_on="$STATE/voice-on"
 on_flag="$STATE/on.$sid"
 off_flag="$STATE/off.$sid"

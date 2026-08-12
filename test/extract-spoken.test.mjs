@@ -37,6 +37,13 @@ test('no block prints empty', () => {
   assert.equal(run('an ordinary reply with no tag at all'), '');
 });
 
+test('a leading dash is stripped so the text can never read as a flag (R-14)', () => {
+  assert.equal(run('<spoken>-o /tmp/x.aiff hello</spoken>'), 'o /tmp/x.aiff hello');
+  assert.equal(run('<spoken>--rate 999 hi</spoken>'), 'rate 999 hi');
+  // A dash mid-text is left alone.
+  assert.equal(run('<spoken>well - that worked</spoken>'), 'well - that worked');
+});
+
 test('multiline content is joined to one line', () => {
   assert.equal(run('<spoken>line one\nline two\n\nline three</spoken>'), 'line one line two line three');
 });

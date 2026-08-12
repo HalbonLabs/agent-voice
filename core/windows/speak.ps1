@@ -146,6 +146,9 @@ if ($j) {
   $msg = ($raw | node $getter last_assistant_message) -join "`n"
   $OutputEncoding = $prevEnc
 }
+# The session id lands in file paths, so clamp anything outside [A-Za-z0-9_-]
+# to the shared-state id rather than letting ..\ traverse (R-13).
+if ($sid -and $sid -notmatch '^[A-Za-z0-9_-]+$') { $sid = 'nosession' }
 
 $globalOn = Join-Path $state 'voice-on'
 $onFlag   = if ($sid) { Join-Path $state "on.$sid" }
@@ -213,7 +216,7 @@ if ([string]::IsNullOrWhiteSpace($msg)) { exit 0 }
 $blocks = [regex]::Matches($msg, '(?s)<spoken>((?:(?!<spoken>).)*?)</spoken>')
 if ($blocks.Count -eq 0) { exit 0 }
 $text = ($blocks[$blocks.Count - 1].Groups[1].Value -replace '[`*#_>|]', '') -replace '\s+', ' '
-$text = $text.Trim()
+$text = $text.Trim() -replace '^-+', ''   # parity with extract-spoken.mjs (R-14)
 if ([string]::IsNullOrWhiteSpace($text)) { exit 0 }
 
 $tag     = if ($sid) { $sid } else { 'nosession' }

@@ -136,6 +136,9 @@ if ($j) {
     $OutputEncoding = $prevEnc
   }
 }
+# The session id lands in file paths, so clamp anything outside [A-Za-z0-9_-]
+# to the shared-state id rather than letting ..\ traverse (R-13).
+if ($sid -and $sid -notmatch '^[A-Za-z0-9_-]+$') { $sid = 'nosession' }
 
 $globalOn = Join-Path $state 'voice-on'
 $onFlag   = if ($sid) { Join-Path $state "on.$sid" }
