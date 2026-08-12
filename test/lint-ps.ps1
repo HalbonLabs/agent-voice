@@ -20,7 +20,8 @@ foreach ($f in $files) {
 }
 
 if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
-  $findings = $files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Error }
+  $settings = Join-Path $root 'PSScriptAnalyzerSettings.psd1'
+  $findings = $files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settings }
   if ($findings) {
     $failed = $true
     $findings | ForEach-Object { Write-Host "ANALYZER $($_.ScriptName):$($_.Line) $($_.RuleName): $($_.Message)" }

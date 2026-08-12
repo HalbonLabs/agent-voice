@@ -6,8 +6,10 @@ $src    = $PSScriptRoot
 $target = Join-Path $env:USERPROFILE '.agent-voice'
 $state  = Join-Path $target 'state'
 
+$avVersion = if (Test-Path (Join-Path $src 'VERSION')) { (Get-Content (Join-Path $src 'VERSION') -Raw).Trim() } else { 'unknown' }
+
 Write-Host ''
-Write-Host 'agent-voice installer (Windows)' -ForegroundColor Cyan
+Write-Host "agent-voice installer (Windows, $avVersion)" -ForegroundColor Cyan
 Write-Host '-------------------------------'
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -24,6 +26,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $target 'lib') | Out-Null
 Copy-Item (Join-Path $src 'core\windows\*') $target -Force
 Copy-Item (Join-Path $src 'core\kokoro*.py') $target -Force
 Copy-Item (Join-Path $src 'lib\*') (Join-Path $target 'lib') -Force
+if (Test-Path (Join-Path $src 'VERSION')) { Copy-Item (Join-Path $src 'VERSION') $target -Force }
 Write-Host ("Installed scripts to " + $target)
 
 # --- choose agents ---

@@ -20,8 +20,10 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 TARGET="$HOME/.agent-voice"
 STATE="$TARGET/state"
 
+AV_VERSION="$(cat "$SRC/VERSION" 2>/dev/null || echo unknown)"
+
 echo ""
-echo "agent-voice installer"
+echo "agent-voice installer ($AV_VERSION)"
 echo "---------------------"
 
 if ! command -v node >/dev/null 2>&1; then
@@ -36,6 +38,7 @@ chmod 700 "$STATE"
 cp -f "$SRC/core/macos/"* "$TARGET/"
 cp -f "$SRC/core/"kokoro*.py "$TARGET/"
 cp -f "$SRC/lib/"* "$TARGET/lib/"
+cp -f "$SRC/VERSION" "$TARGET/VERSION" 2>/dev/null || true
 chmod +x "$TARGET"/*.sh
 echo "Installed scripts to $TARGET"
 
