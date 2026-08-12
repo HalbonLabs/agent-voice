@@ -58,12 +58,17 @@ inside a code fence, and write nothing else at all: no preamble, no summary, no
 
 $text
 "@
+  # Exactly ONE user-visible channel, deliberately. This used to also set
+  # "systemMessage" as a belt-and-braces fallback on the belief that it did not
+  # render. Where it does render, every command prints twice: once as
+  # "UserPromptSubmit says: ..." and again from the model doing what
+  # additionalContext told it to. Adding a second channel to cover a client that
+  # shows none is what doubles the output on every client that shows both.
   $payload = [ordered]@{
     hookSpecificOutput = [ordered]@{
       hookEventName    = 'UserPromptSubmit'
       additionalContext = $instruction
     }
-    systemMessage = $text
   }
   [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 4))
   # Also on stderr, for terminals that show that instead of parsing the JSON.

@@ -4,7 +4,7 @@ The honest state of what has been run where, so nothing is a surprise.
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| Status | Tested end to end, all three agents | Written and reviewed, not yet run on a real Mac | Not supported; installer refuses |
+| Status | Tested end to end, all three agents | Install + Kokoro verified on a real Mac; rest listed below | Not supported; installer refuses |
 
 ## Windows
 
@@ -15,18 +15,24 @@ is PowerShell startup.
 
 ## macOS
 
-The scripts share the same Node helpers and voice catalogue as Windows and are
-kept in lockstep by the parity rule (see CONTRIBUTING.md), but have not yet
-been exercised on an actual Mac. The two least certain parts both touch the OS
-directly, and both have setup-free fallbacks that work regardless:
+Verified on a real Mac on 2026-08-10 (macOS 25.5, Apple silicon, Python
+3.12.13) by installing and checking each claim rather than trusting the
+installer's own output. That run found and fixed three installer defects, so
+"verified" means exactly this:
 
-- the **Stop agent-voice** Quick Action the installer builds (fallback:
-  `voice stop` in any session);
-- `voice pick`, which opens Terminal via `osascript` (fallback:
-  `voice preview <n>` plus `voice model <n>`).
+- **Verified:** the installer end to end, Python resolution inside Kokoro's
+  3.10 to 3.12 window (a 3.12 install succeeding, 3.9 and 3.13 both
+  refused), the private venv, and the Kokoro engine speaking.
+- **Still unverified:** `voice pick` (opens Terminal via `osascript` and
+  triggers an Automation permission prompt on first use; `voice preview` is
+  the setup-free fallback), the edge-tts, ElevenLabs and Native engines on
+  macOS, `uninstall.sh` against a real install, and Codex and Kimi on macOS
+  at all.
 
-If you are on a Mac you are the first; please report anything that misbehaves
-rather than working around it.
+The scripts share the same Node helpers and voice catalogue as Windows and
+are kept in lockstep by the parity rule (see CONTRIBUTING.md). If something
+on the unverified list misbehaves, please report it rather than working
+around it.
 
 ## Linux
 

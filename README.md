@@ -22,10 +22,11 @@ others stay silent, on different engines and speeds.
 | Codex CLI | Yes | Yes |
 | Kimi Code CLI | Yes | Yes (via transcript) |
 
-Windows is tested end to end with all three. macOS is written and reviewed
-but awaiting its first real Mac. Linux is refused at install rather than
-half-working. Details, including the Codex malformed-JSON workaround and the
-Kimi transcript recovery: [docs/PLATFORM-STATUS.md](docs/PLATFORM-STATUS.md).
+Windows is tested end to end with all three. macOS is verified on a real Mac
+for install and the Kokoro engine, with the remaining pieces listed honestly.
+Linux is refused at install rather than half-working. Details, including the
+Codex malformed-JSON workaround and the Kimi transcript recovery:
+[docs/PLATFORM-STATUS.md](docs/PLATFORM-STATUS.md).
 
 ## Install
 

@@ -47,10 +47,28 @@ function Get-Agents {
       Key        = $d.Key
       Name       = $d.Name
       Note       = $d.Note
-      Installed  = [bool](Get-Command $d.Key -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $h $d.Dir))
+      # Installed means the command is runnable, nothing weaker. A config
+      # directory is NOT evidence: hooks only fire from inside a running agent,
+      # so an agent whose binary is absent cannot use agent-voice whatever it
+      # left on disk. The old `-or (Test-Path ...Dir)` reported Codex and Kimi as
+      # installed on any machine carrying a stale or foreign config folder.
+      Installed  = [bool](Get-Command $d.Key -ErrorAction SilentlyContinue)
+      # Worth saying separately — usually means installed once, or off PATH.
+      Configured = [bool](Test-Path (Join-Path $h $d.Dir))
       Registered = $registered
     }
   }
+}
+
+# One place decides the label, so the piped and interactive lists cannot drift.
+function Get-StatusTag ($it, $open, $close) {
+  $text =
+    if ($it.Registered)     { 'already set up' }
+    elseif ($it.Installed)  { '' }
+    elseif ($it.Configured) { 'config found, but not on PATH' }
+    else                    { 'not detected on this machine' }
+  if ([string]::IsNullOrEmpty($text)) { return '' }
+  return "  $open$text$close"
 }
 
 # Arrow-key checklist. Falls back to a typed list when stdin is not a real console
@@ -62,7 +80,7 @@ function Select-Agents ($items) {
   if ([Console]::IsInputRedirected) {
     Write-Host 'Which agents should use agent-voice? (comma-separated)'
     foreach ($it in $items) {
-      $tag = if (-not $it.Installed) { '  [not detected]' } elseif ($it.Registered) { '  [already set up]' } else { '' }
+      $tag = Get-StatusTag $it '[' ']'
       Write-Host ("  {0,-8} {1,-16} {2}{3}" -f $it.Key, $it.Name, $it.Note, $tag)
     }
     $typed = Read-Host 'Agents (Enter for claude)'
@@ -91,7 +109,7 @@ function Select-Agents ($items) {
         $it = $items[$i]
         $cursor = if ($i -eq $pos) { '>' } else { ' ' }
         $box    = if ($sel[$it.Key]) { '[x]' } else { '[ ]' }
-        $tag    = if (-not $it.Installed) { '  (not detected on this machine)' } elseif ($it.Registered) { '  (already set up)' } else { '' }
+        $tag    = Get-StatusTag $it '(' ')'
         $line   = "{0} {1} {2,-16} {3}{4}" -f $cursor, $box, $it.Name, $it.Note, $tag
         if ($line.Length -gt $width) { $line = $line.Substring(0, $width) }
         $colour = if (-not $it.Installed) { 'DarkGray' } elseif ($i -eq $pos) { 'Cyan' } else { 'Gray' }

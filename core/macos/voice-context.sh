@@ -392,6 +392,15 @@ if [ "$cmd_rc" = "2" ]; then
   # So the reply is handed to the model as context instead, with an instruction to
   # print it verbatim. That costs one cheap turn, but the model's reply is the one
   # channel every client displays, which is the whole point.
+  #
+  # Exactly ONE user-visible channel, deliberately. This block used to also set
+  # "systemMessage", as a belt-and-braces fallback on the belief that it did not
+  # render. In a terminal it renders perfectly well, so every command printed
+  # twice: once as "UserPromptSubmit says: ..." from systemMessage, and again from
+  # the model doing what additionalContext told it to. Adding a second channel to
+  # cover a client that shows none is what produces a double on every client that
+  # shows both. stderr is kept because on exit 0 it is not surfaced to the user,
+  # only to the hook log, which is where it earns its place.
   printf '%s' "$cmd_out" | CMD="$cmd" node -e '
     let s = "";
     process.stdin.on("data", c => s += c).on("end", () => {
@@ -405,8 +414,7 @@ if [ "$cmd_rc" = "2" ]; then
         hookSpecificOutput: {
           hookEventName: "UserPromptSubmit",
           additionalContext: instruction
-        },
-        systemMessage: text
+        }
       }) + "\n");
       process.stderr.write(text + "\n");
     });
