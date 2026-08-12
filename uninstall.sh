@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# agent-voice uninstaller (macOS/Linux). Removes hooks from all agents and (optionally) the files.
+# agent-voice uninstaller (macOS; also works on Linux for pre-R-10 installs).
+# Removes hooks from all agents and (optionally) the files.
 TARGET="$HOME/.agent-voice"
 
 # Stop the Kokoro daemon first, if one is resident, so its memory is freed now.

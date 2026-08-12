@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
-# agent-voice installer (macOS/Linux). Interactive: choose agents and a voice engine.
+# agent-voice installer (macOS). Interactive: choose agents and a voice engine.
 # Run:  bash install.sh
 # shellcheck disable=SC2034  # sel_* variables are read indirectly via eval (bash 3.2 has no associative arrays)
 set -e
+
+# Linux is refused, not half-installed: every playback call in the hooks is
+# afplay with `say` as the fallback, so on Linux the install would complete
+# cheerfully and every reply would be silent forever with no error shown.
+# That is the worst failure mode a voice tool can have (R-10).
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "agent-voice: this installer supports macOS only (Windows has install.ps1)." >&2
+  echo "Linux is not supported yet because audio playback is macOS-specific;" >&2
+  echo "it is planned as part of the cross-platform core rewrite. Follow or file" >&2
+  echo "an issue at https://github.com/HalbonLabs/agent-voice/issues" >&2
+  exit 1
+fi
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 TARGET="$HOME/.agent-voice"
@@ -296,11 +308,7 @@ WFLOW
 deny_python_engine() {  # deny_python_engine ENGINE RANGE_TEXT
   echo ""
   echo "No usable Python for $1 was found. It needs $2."
-  if [ "$(uname)" = "Darwin" ]; then
-    echo "  Install one with:  brew install python@3.12     (or from https://www.python.org/downloads/)"
-  else
-    echo "  Install one with:  sudo apt-get install python3 python3-pip python3-venv"
-  fi
+  echo "  Install one with:  brew install python@3.12     (or from https://www.python.org/downloads/)"
   echo "  Note: a NEWER Python does not help; the range really is $2."
   echo "  Then run this installer again and pick that engine."
   echo "Using Native offline for now, so you still get a working voice."

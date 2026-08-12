@@ -111,13 +111,18 @@ cd agent-voice
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-**macOS / Linux** (Terminal):
+**macOS** (Terminal):
 
 ```
 git clone https://github.com/HalbonLabs/agent-voice.git
 cd agent-voice
 bash install.sh
 ```
+
+Linux is not supported yet: the playback layer is macOS-only (`afplay`/`say`),
+so an install would complete and then every reply would be silent. The
+installer refuses rather than pretending. Linux support is planned as part of
+the cross-platform core rewrite; see the repository issues.
 
 The installer detects which supported agents are actually on your machine and
 offers them as a checklist: Up/Down to move, Space to toggle, `A` for all, Enter
@@ -304,7 +309,7 @@ edge-tts, `python -m edge_tts --list-voices` prints the hundreds it supports.
 ## Uninstall
 
 **Windows:** `powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1`
-**macOS / Linux:** `bash uninstall.sh`
+**macOS:** `bash uninstall.sh`
 
 This removes the agent-voice hooks from every agent config and the stop hotkey,
 and offers to delete `~/.agent-voice`. Reload open sessions afterwards.
