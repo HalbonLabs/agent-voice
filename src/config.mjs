@@ -64,6 +64,25 @@ export function voiceStyle(sid, home = homedir()) {
   return { id: stylesData.default, from: 'default' };
 }
 
+// Humanize is the DELIVERY axis, orthogonal to style (the content axis):
+// written disfluencies the model places where a person would actually
+// hesitate. Written, not tagged, because only ElevenLabs' newest models can
+// render audio tags; on every other engine a [laughs] tag would be read
+// aloud literally.
+export const HUMANIZE_LEVELS = ['off', 'subtle', 'chatty'];
+
+export function humanizeLevel(sid, home = homedir()) {
+  if (sid) {
+    try {
+      const v = readFileSync(join(stateDir(home), `humanize.${sid}`), 'utf8').trim();
+      if (HUMANIZE_LEVELS.includes(v)) return { level: v, from: 'session' };
+    } catch { /* no session override */ }
+  }
+  const cfg = readConfig(home);
+  if (HUMANIZE_LEVELS.includes(cfg.voice_humanize)) return { level: cfg.voice_humanize, from: 'default' };
+  return { level: 'off', from: 'default' };
+}
+
 // key=value, hash comments, later duplicates win (matching the old sed|tail -1).
 export function readConfig(home = homedir()) {
   const path = join(rootDir(home), 'config');

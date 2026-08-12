@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import { getField } from '../lib/json-get.mjs';
 import {
   avHome, ensureStateDir, clampSid, sessionMode, readConfig, resolveSession, rootDir,
-  voiceStyle, stylesData,
+  voiceStyle, stylesData, humanizeLevel,
 } from './config.mjs';
 import { handleCommand } from './commands.mjs';
 import { snapshotTurn } from './facts.mjs';
@@ -18,7 +18,28 @@ import { snapshotTurn } from './facts.mjs';
 // spoken first. The writing rules in the middle come from the selected style
 // (voice style: plain by default), so the same skeleton can ask for anything
 // from "short everyday words, delta only" to a fuller picture.
-function buildContract(styleId) {
+// Delivery texture, layered over any style. These are spoken words, not
+// audio tags: a bracketed tag would be read aloud on most engines. The caps
+// matter: one hesitation is human, three is a nervous robot.
+const HUMANIZE_RULES = {
+  off: [],
+  subtle: [
+    'Deliver it like unscripted speech: one brief hesitation is welcome where',
+    "a person would genuinely pause to think, written as 'um,' or 'hmm,' or a",
+    'beat of thought written as three dots. At most one or two per summary.',
+    'These are delivery, not filler: they are allowed even in the plain style.',
+  ],
+  chatty: [
+    'Deliver it like unscripted speech: a brief hesitation where a person',
+    "would pause to think, written as 'um,' or 'hmm,' or three dots for a beat",
+    "of thought, and the odd natural opener like 'right,' or 'oh,'. If",
+    "something genuinely amused you, a half-laugh written as 'heh' is fine.",
+    'At most two or three touches per summary, and never forced.',
+    'These are delivery, not filler: they are allowed even in the plain style.',
+  ],
+};
+
+function buildContract(styleId, humanize) {
   const style = stylesData.styles.find(s => s.id === styleId) || stylesData.styles[0];
   return [
     'Voice mode is active. End every reply with, on its own line:',
@@ -28,6 +49,7 @@ function buildContract(styleId) {
     ...style.rules,
     'One subject per sentence: when there are several things to say, give each',
     'its own short sentence rather than one long one.',
+    ...(HUMANIZE_RULES[humanize] || []),
     'Do NOT state file counts, line counts, or test results: those are measured',
     'independently and will be spoken for you. Do not claim success; say what',
     'you did. Pick the intent honestly: question if you need a decision, blocked',
@@ -46,7 +68,7 @@ const EVENT_NAME = agentFlag === 'gemini' ? 'BeforeAgent' : 'UserPromptSubmit';
 // id. A sweep of week-old files runs at most once a day, costing one readdir.
 const GC_INTERVAL_MS = 24 * 3600 * 1000;
 const GC_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
-const GC_PATTERN = /^(on|off|text|engine|speed|voice|when|style|active|turn|speak|job|say)\./;
+const GC_PATTERN = /^(on|off|text|engine|speed|voice|when|style|humanize|active|turn|speak|job|say)\./;
 
 function sweepStaleState(state) {
   const stamp = join(state, 'last-gc');
@@ -136,7 +158,7 @@ function main(payload) {
       c.unref();
     }
 
-    const contract = buildContract(voiceStyle(sid, home).id);
+    const contract = buildContract(voiceStyle(sid, home).id, humanizeLevel(sid, home).level);
     if (agentFlag === 'gemini') {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: EVENT_NAME, additionalContext: contract },

@@ -12,7 +12,7 @@ import { join } from 'path';
 import {
   rootDir, resolveSession, defaultVoice, defaultSpeed,
   ENGINE_IDS, EDGE_SHORTLIST, enginesData, libFile,
-  voiceStyle, stylesData, STYLE_IDS,
+  voiceStyle, stylesData, STYLE_IDS, humanizeLevel, HUMANIZE_LEVELS,
 } from './config.mjs';
 import { platform } from './platform/index.mjs';
 import { stopAll } from './stop.mjs';
@@ -66,6 +66,7 @@ export function handleCommand(prompt, sid, home) {
       '  voice speed             list speeds, then: voice speed 1.5',
       '  voice when              when to speak: always, problem, question, long, never',
       '  voice style             how summaries are written: plain, standard, technical, detailed',
+      '  voice humanize          delivery texture: off, subtle, chatty (umms, beats, the odd heh)',
       '  voice snooze [mins]     mute all audio everywhere for a while (default 30)',
       '  voice last              why the last turn did or did not speak',
       '  voice list              same as voice model, lists what is available',
@@ -105,6 +106,8 @@ export function handleCommand(prompt, sid, home) {
     say(`  when    ${w.mode} (${w.from === 'session' ? 'this session' : 'default'})`);
     const sty = voiceStyle(sid, home);
     say(`  style   ${sty.id} (${sty.from === 'session' ? 'this session' : 'default'})`);
+    const hum = humanizeLevel(sid, home);
+    if (hum.level !== 'off') say(`  humanize ${hum.level} (${hum.from === 'session' ? 'this session' : 'default'})`);
     const snoozed = snoozeUntil(home);
     if (Date.now() < snoozed) {
       say(`  snooze  all audio muted for another ${Math.ceil((snoozed - Date.now()) / 60000)} min (voice snooze off to end)`);
@@ -137,6 +140,35 @@ export function handleCommand(prompt, sid, home) {
       say(`agent-voice: summaries in this session are now written '${arg}'. Takes effect from the next reply.`);
     } else {
       say(`agent-voice: unknown style '${arg}'. Choose from: ${STYLE_IDS.join(' ')}, or 'default'.`);
+    }
+    return done();
+  }
+
+  if ((m = cmd.match(/^voice humanize\b(.*)$/))) {
+    const arg = m[1].trim();
+    const humFlag = join(p.state, `humanize.${sid}`);
+    if (!arg) {
+      const cur = humanizeLevel(sid, home).level;
+      say('agent-voice: how natural should the delivery sound?');
+      const desc = {
+        off: 'clean read, no hesitations',
+        subtle: "an occasional 'um' or a beat of thought, one or two at most",
+        chatty: "hesitations plus natural openers and the odd half-laugh ('heh')",
+      };
+      for (const l of HUMANIZE_LEVELS) say(`  ${l === cur ? '*' : ' '} ${l.padEnd(8)} ${desc[l]}`);
+      say("  * is in use now. Choose with: voice humanize subtle   (reset: voice humanize default)");
+      say('  Note: these are written into the words the voice reads, so they work on');
+      say('  every engine; only ElevenLabs could ever produce a true laugh sound.');
+      return done();
+    }
+    if (arg === 'default') {
+      rm(humFlag);
+      say(`agent-voice: humanize override cleared; back to ${humanizeLevel(sid, home).level}.`);
+    } else if (HUMANIZE_LEVELS.includes(arg)) {
+      writeFileSync(humFlag, arg);
+      say(`agent-voice: delivery is now '${arg}' for this session. Takes effect from the next reply.`);
+    } else {
+      say(`agent-voice: unknown level '${arg}'. Choose from: ${HUMANIZE_LEVELS.join(' ')}, or 'default'.`);
     }
     return done();
   }
