@@ -138,6 +138,58 @@ test('unknown provider is reported, not fatal', () => {
   assert.equal(existsSync(join(home, '.claude', 'settings.json')), true);
 });
 
+test('first install backs up the pre-agent-voice original', () => {
+  const home = fakeHome();
+  const original = JSON.stringify({ model: 'opus' }, null, 2);
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), original);
+  install(home, 'claude');
+  const bak = join(home, '.claude', 'settings.json.agent-voice.bak');
+  assert.equal(readFileSync(bak, 'utf8'), original);
+});
+
+test('later runs never overwrite the backup', () => {
+  const home = fakeHome();
+  const original = JSON.stringify({ model: 'opus' }, null, 2);
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), original);
+  install(home, 'claude');
+  install(home, 'claude');
+  uninstall(home, 'claude');
+  const bak = join(home, '.claude', 'settings.json.agent-voice.bak');
+  assert.equal(readFileSync(bak, 'utf8'), original, 'backup must stay the pre-agent-voice original');
+});
+
+test('no backup is created when there was nothing to back up', () => {
+  const home = fakeHome();
+  install(home, 'claude');
+  assert.equal(existsSync(join(home, '.claude', 'settings.json.agent-voice.bak')), false);
+});
+
+test('writes go through a temp file, and a stale temp file is harmless', () => {
+  const home = fakeHome();
+  const dir = join(home, '.claude');
+  mkdirSync(dir, { recursive: true });
+  // The debris a mid-write kill would leave behind.
+  writeFileSync(join(dir, 'settings.json.agent-voice.tmp'), '{"half":');
+  install(home, 'claude');
+  const s = readSettings(home);
+  assert.equal(oursIn(s.hooks.Stop).length, 1);
+  // A successful write consumes the temp file via rename.
+  assert.equal(existsSync(join(dir, 'settings.json.agent-voice.tmp')), false);
+});
+
+test('kimi toml writes are atomic with a backup too', () => {
+  const home = fakeHome();
+  const tomlPath = join(home, '.kimi-code', 'config.toml');
+  mkdirSync(join(home, '.kimi-code'), { recursive: true });
+  const original = '[general]\ntheme = "dark"\n';
+  writeFileSync(tomlPath, original);
+  install(home, 'kimi');
+  assert.equal(readFileSync(tomlPath + '.agent-voice.bak', 'utf8'), original);
+  assert.equal(existsSync(tomlPath + '.agent-voice.tmp'), false);
+});
+
 test('forms builds platform-correct invocations', () => {
   const win = forms('speak', 'win', 'C:\\scripts');
   assert.equal(win.argv.command, 'powershell.exe');
