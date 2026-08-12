@@ -15,6 +15,7 @@ import {
 } from './config.mjs';
 import { platform } from './platform/index.mjs';
 import { stopAll } from './stop.mjs';
+import { whenMode, WHEN_MODES } from './policy.mjs';
 
 const SPEED_MIN = 0.5;
 const SPEED_MAX = 2.0;
@@ -41,6 +42,7 @@ export function handleCommand(prompt, sid, home) {
   const out = [];
   const say = (...ls) => out.push(...ls);
   const done = () => ({ handled: true, lines: out });
+  let m;
 
   if (cmd === 'voice stop' || cmd === 'shush' || cmd === 'stop voice') {
     stopAll(home);
@@ -61,6 +63,7 @@ export function handleCommand(prompt, sid, home) {
       '  voice preview <n>       hear a voice without switching to it',
       '  voice pick              browse voices with arrows and P, in a new window',
       '  voice speed             list speeds, then: voice speed 1.5',
+      '  voice when              when to speak: always, problem, question, long, never',
       '  voice list              same as voice model, lists what is available',
       '  voice help              this list',
       '',
@@ -94,7 +97,40 @@ export function handleCommand(prompt, sid, home) {
     say(`  engine  ${engine} (${s.engineFrom === 'session' ? 'this session' : 'default'})`);
     say(`  voice   ${s.voice} (${s.voiceFrom === 'session' ? 'this session' : 'default'})`);
     say(`  speed   ${s.speed}x (${s.speedFrom === 'session' ? 'this session' : 'default'}, 1.0 is normal)`);
+    const w = whenMode(sid, home);
+    say(`  when    ${w.mode} (${w.from === 'session' ? 'this session' : 'default'})`);
     if (engine === 'elevenlabs') say('  note    ElevenLabs ignores speed; it has no rate control in this integration.');
+    return done();
+  }
+
+  if ((m = cmd.match(/^voice when\b(.*)$/))) {
+    const arg = m[1].trim();
+    const whenFlag = join(p.state, `when.${sid}`);
+    if (!arg) {
+      const cur = whenMode(sid, home).mode;
+      say('agent-voice: when should this session speak?');
+      const desc = {
+        always: 'every turn (the earcon still marks the intent)',
+        problem: 'only question, blocked, or failed turns',
+        question: 'only when it needs a decision from you',
+        long: 'only turns over 45 seconds (question/failed cut through)',
+        never: 'earcon only, no speech',
+      };
+      for (const w of WHEN_MODES) {
+        say(`  ${w === cur ? '*' : ' '} ${w.padEnd(9)} ${desc[w]}`);
+      }
+      say("  * is in use now. Choose with: voice when problem   (reset: voice when default)");
+      return done();
+    }
+    if (arg === 'default') {
+      rm(whenFlag);
+      say(`agent-voice: when-override cleared; back to ${whenMode(sid, home).mode}.`);
+    } else if (WHEN_MODES.includes(arg)) {
+      writeFileSync(whenFlag, arg);
+      say(`agent-voice: this session speaks on '${arg}' now.`);
+    } else {
+      say(`agent-voice: unknown mode '${arg}'. Choose from: ${WHEN_MODES.join(' ')}, or 'default'.`);
+    }
     return done();
   }
 
@@ -109,8 +145,6 @@ export function handleCommand(prompt, sid, home) {
     }
     return done();
   }
-
-  let m;
 
   if ((m = cmd.match(/^voice preview\b(.*)$/))) {
     let arg = m[1].trim();

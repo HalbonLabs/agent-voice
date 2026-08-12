@@ -2,7 +2,7 @@
 // processes. Playback and SAPI go through short PowerShell children; that costs
 // PowerShell startup, but only inside the detached speaker, which no agent
 // waits for. Everything engine-shaped lives above this in src/engines.
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync, spawn } from 'child_process';
 
 function psRun(script) {
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore' });
@@ -27,6 +27,20 @@ export function play(file) {
       $p = New-Object System.Media.SoundPlayer '${esc}'
       $p.PlaySync(); $p.Dispose(); exit 0
     } catch { exit 1 }`);
+}
+
+// Non-blocking playback: resolves when the audio ends. Used for the earcon,
+// which plays while synthesis runs.
+export function playAsync(file) {
+  const esc = file.replace(/'/g, "''");
+  return new Promise(resolve => {
+    const c = spawn('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command',
+       `try { $p = New-Object System.Media.SoundPlayer '${esc}'; $p.PlaySync(); $p.Dispose() } catch {}`],
+      { stdio: 'ignore', windowsHide: true });
+    c.on('exit', () => resolve(true));
+    c.on('error', () => resolve(false));
+  });
 }
 
 // SAPI's scale is -10..10 with 0 normal, so 1.2x lands on its long-standing

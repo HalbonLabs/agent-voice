@@ -532,8 +532,16 @@ case "$choice" in
     ;;
 esac
 
+# Speak on problems by default, not on every turn: the earcon still marks
+# every turn's intent, and 'voice when always' is one command away (P3-2).
+echo "voice_when=problem" >> "$CFG"
+
 # Global default ON so it works immediately.
 : > "$STATE/voice-on"
+echo ""
+echo "Speech policy: speaks only for question / blocked / failed turns; a short"
+echo "tone marks every other turn. Type 'voice when always' in a session for"
+echo "speech on every turn, or 'voice when' to see the options."
 
 # Register hooks into the chosen agents.
 echo ""

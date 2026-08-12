@@ -9,6 +9,16 @@ export function play(file) {
   return r.status === 0;
 }
 
+// Non-blocking playback: resolves when the audio ends. Used for the earcon,
+// which plays while synthesis runs.
+export function playAsync(file) {
+  return new Promise(resolve => {
+    const c = spawn('afplay', [file], { stdio: 'ignore' });
+    c.on('exit', () => resolve(true));
+    c.on('error', () => resolve(false));
+  });
+}
+
 // say takes words per minute; its default is about 175.
 export function speakNative(text, { speed, voice } = {}) {
   const args = [];

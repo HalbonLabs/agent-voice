@@ -344,10 +344,17 @@ switch ($choice) {
     }
   }
 }
+# Speak on problems by default, not on every turn: the earcon still marks
+# every turn's intent, and 'voice when always' is one command away (P3-2).
+$cfg += 'voice_when=problem'
 Set-Content -Path (Join-Path $target 'config') -Value ($cfg -join "`r`n")
 
 # Global default ON so it works immediately.
 New-Item -ItemType File -Force -Path (Join-Path $state 'voice-on') | Out-Null
+Write-Host ''
+Write-Host 'Speech policy: speaks only for question / blocked / failed turns; a short' -ForegroundColor Gray
+Write-Host "tone marks every other turn. Type 'voice when always' in a session for" -ForegroundColor Gray
+Write-Host "speech on every turn, or 'voice when' to see the options." -ForegroundColor Gray
 
 # --- register hooks into the chosen agents ---
 Write-Host ''
