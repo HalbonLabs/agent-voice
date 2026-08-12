@@ -120,6 +120,7 @@ wav="$STATE/say.$tag.wav"
     # say takes words per minute; its default is about 175.
     say_args=""
     [ -n "$speed_mul" ] && say_args="-r $(awk -v m="$speed_mul" 'BEGIN{printf "%d", 175*m}')"
+    # shellcheck disable=SC2086  # say_args is deliberately word-split: empty, or "-r <wpm>"
     if [ -n "${native_voice:-}" ]; then say $say_args -v "$native_voice" "$spoken"; else say $say_args "$spoken"; fi
   fi
 

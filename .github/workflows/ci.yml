@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Includes the referenced-path check (test/referenced-paths.test.mjs) and
+      # the Python unit tests, which the Node suite spawns.
+      - name: npm test
+        run: npm test
+
+      - name: bash parse gate
+        if: runner.os != 'Windows'
+        run: |
+          set -e
+          for f in install.sh uninstall.sh core/macos/*.sh; do bash -n "$f"; done
+
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh uninstall.sh core/macos/*.sh
+
+      - name: PowerShell parse gate + PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          ./test/lint-ps.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: python compileall
+        run: python -m compileall -q core/

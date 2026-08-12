@@ -151,6 +151,7 @@ if [ -n "$sid" ]; then
       elif ! node -e 'process.exit(require(process.argv[1]).some(v => v.id === process.argv[2]) ? 0 : 1)' "$ROOT/lib/kokoro-voices.json" "$arg" 2>/dev/null; then
         echo "agent-voice: '$arg' is not a Kokoro voice. Type 'voice model' to see the list." >&2
       else
+        # shellcheck disable=SC2097,SC2098  # $ROOT in the path expands in this shell, which has it; the env assignment is for the child
         (ROOT="$ROOT" bash "$ROOT/pick-voice.sh" --preview "$arg" >/dev/null 2>&1 &)
         echo "agent-voice: playing $arg. Switch to it with: voice model $arg" >&2
       fi

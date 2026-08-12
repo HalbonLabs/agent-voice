@@ -1,0 +1,9 @@
+# Justified exclusions only; anything not listed here must pass.
+#
+# SC1091: sourced files (the user config) are runtime paths shellcheck cannot
+#         follow. R-11 will remove the source entirely; drop this with it.
+# SC2016: `node -e '...'` one-liners use JS template literals, which look like
+#         unexpanded shell variables but must stay single-quoted.
+# SC2129: style-only preference for grouped redirects; the installer's
+#         individual `>> "$CFG"` appends read better interleaved with logic.
+disable=SC1091,SC2016,SC2129

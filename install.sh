@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agent-voice installer (macOS/Linux). Interactive: choose agents and a voice engine.
 # Run:  bash install.sh
+# shellcheck disable=SC2034  # sel_* variables are read indirectly via eval (bash 3.2 has no associative arrays)
 set -e
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
