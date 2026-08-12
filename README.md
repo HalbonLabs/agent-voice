@@ -4,10 +4,13 @@ Turn a coding agent's long replies into a short, plain-language summary you
 can read in one glance, and optionally hear spoken aloud in a natural voice.
 
 agent-voice adds a `<spoken>` "TL;DR in human words" to the end of every
-reply, then reads just that summary out loud. It works across AI coding
-agents that support hooks (Claude Code, Codex CLI, Kimi Code CLI), on Windows
-and macOS. Pairs well with dictation tools like Wispr Flow: speak your prompt
-in, get a concise summary back out.
+reply, then reads just that summary out loud, prefixed with **measured
+facts**: the turn's own diff, whether the tests actually passed, and, when
+the model claims success over red tests, it says so. A short intent tone
+marks every turn (question, done, blocked, failed), and an attention policy
+decides when words follow. Works across six coding agents (Claude Code,
+Codex CLI, Kimi Code, Qwen Code, Droid, Goose) on Windows and macOS. Pairs
+well with dictation tools like Wispr Flow.
 
 It is two hooks per agent and no application: a `UserPromptSubmit` hook
 injects the summary instruction each turn, and a `Stop` hook speaks the block
@@ -21,6 +24,13 @@ others stay silent, on different engines and speeds.
 | Claude Code | Yes | Yes |
 | Codex CLI | Yes | Yes |
 | Kimi Code CLI | Yes | Yes (via transcript) |
+| Qwen Code | Yes | Yes |
+| Droid (Factory) | Yes | Yes (via transcript) |
+| Goose | No | Yes |
+
+Gemini CLI is supported experimentally and Amp via an in-process shim; the
+per-agent details, including what has and has not been run live, are in
+[docs/AGENTS.md](docs/AGENTS.md).
 
 Windows is tested end to end with all three. macOS is verified on a real Mac
 for install and the Kokoro engine, with the remaining pieces listed honestly.
@@ -33,6 +43,14 @@ Codex malformed-JSON workaround and the Kimi transcript recovery:
 You need the agent(s) already installed, which is where Node comes from.
 Python 3 is only needed for the edge-tts and Kokoro engines.
 
+The quickest path needs no clone:
+
+```
+npx agent-voice install
+```
+
+Or from a clone:
+
 ```
 git clone https://github.com/HalbonLabs/agent-voice.git
 cd agent-voice
@@ -40,6 +58,10 @@ cd agent-voice
 
 Then on Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1`
 On macOS: `bash install.sh`
+
+Claude Code users can also add it as a plugin (the repo carries a plugin
+manifest); the plugin runs with the built-in OS voice out of the box, and
+the installer adds the natural-voice engines.
 
 The installer detects your agents, offers them as a checklist, asks which
 voice engine to use, wires the hooks in without touching anything else in

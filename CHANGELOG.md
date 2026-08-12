@@ -2,7 +2,37 @@
 
 All notable changes to agent-voice. Dates are UTC.
 
-## Unreleased (0.1.0)
+## 0.1.0 - 2026-08-12
+
+### Added
+- **Grounded summaries**: the Stop hook measures the turn independently of
+  the model's self-report: the turn's own git diff (snapshotted at prompt
+  time), the last test or build run and how it actually ended, error and
+  edit counts, and duration. Facts are spoken first, deterministically, and
+  when the model claims success over red tests the reply opens with the
+  contradiction and the intent is forced to failed. All collectors are
+  fail-open and budgeted.
+- **Intent earcons and attention policy**: four short tones mark every
+  turn's intent (question, done, blocked, failed) before any words; `voice
+  when always|problem|question|long|never` decides whether the words
+  follow, with a short-turn watched heuristic, a cross-session rate limit,
+  five-minute de-duplication, and multi-session arbitration (question and
+  failed cut through from any session, prefixed with the project name).
+  Fresh installs default to `problem`.
+- **Latency**: Kokoro synthesis is streamed sentence by sentence; the
+  earcon plays while synthesis runs; the daemon pre-warms while the model
+  thinks. Measured time to first sound ~420 ms from the Stop hook firing.
+- **Reach**: desktop notifications on problem turns (osascript / WinRT
+  toast), and phone push via ntfy or a generic webhook for problem turns
+  over a duration threshold.
+- **Agents**: Qwen Code, Droid (Factory), and Goose join Claude Code,
+  Codex and Kimi; Gemini CLI ships experimentally (documented open vendor
+  bug); an Amp in-process shim ships unexercised. The roster is data
+  (`data/agents.json`).
+- **Distribution**: Claude Code plugin manifest, `npx agent-voice install`,
+  and Homebrew/winget packaging templates.
+
+## Pre-0.1.0 remediation
 
 ### Security
 - The Kokoro daemon's port/token file is created `0600` before any bytes are

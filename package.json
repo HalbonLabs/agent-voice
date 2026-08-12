@@ -1,9 +1,38 @@
 {
   "name": "agent-voice",
   "version": "0.1.0",
+  "description": "Hear what your agent actually did: grounded, fact-checked spoken summaries of every turn, across six coding agents.",
   "private": false,
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HalbonLabs/agent-voice.git"
+  },
+  "bin": {
+    "agent-voice": "bin/agent-voice.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "lib/",
+    "data/",
+    "core/",
+    "hooks/",
+    "docs/",
+    "integrations/",
+    "install.sh",
+    "install.ps1",
+    "uninstall.sh",
+    "uninstall.ps1",
+    "VERSION",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["claude-code", "codex", "tts", "voice", "hooks", "agent", "summaries"],
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
     "lint:sh": "shellcheck install.sh uninstall.sh core/macos/*.sh",

@@ -1,0 +1,13 @@
+{
+  "name": "agent-voice",
+  "description": "Hear what your agent actually did: a grounded, fact-checked spoken summary of every turn, with intent earcons and an attention policy. Works out of the box with the OS voice; run the bundled installer for the natural-voice engines.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Halbon Labs",
+    "url": "https://github.com/HalbonLabs/agent-voice"
+  },
+  "homepage": "https://github.com/HalbonLabs/agent-voice",
+  "repository": "https://github.com/HalbonLabs/agent-voice",
+  "license": "MIT",
+  "keywords": ["voice", "tts", "hooks", "summaries", "accessibility"]
+}

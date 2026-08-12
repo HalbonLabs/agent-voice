@@ -1,0 +1,18 @@
+# winget manifest template (singleton). Submit to microsoft/winget-pkgs per
+# release; winget requires an installer artifact, so attach a zip of the repo
+# to the GitHub release and point InstallerUrl at it with its SHA256.
+PackageIdentifier: HalbonLabs.AgentVoice
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Halbon Labs
+PackageName: agent-voice
+License: MIT
+ShortDescription: Grounded, fact-checked spoken summaries for AI coding agents.
+PackageUrl: https://github.com/HalbonLabs/agent-voice
+Installers:
+  - Architecture: neutral
+    InstallerType: zip
+    InstallerUrl: https://github.com/HalbonLabs/agent-voice/releases/download/v0.1.0/agent-voice-0.1.0.zip
+    InstallerSha256: REPLACE_WITH_RELEASE_ZIP_SHA256
+ManifestType: singleton
+ManifestVersion: 1.6.0
