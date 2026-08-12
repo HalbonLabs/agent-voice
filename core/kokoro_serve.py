@@ -19,6 +19,7 @@ mean a request must come from something that can already read this user's files.
 
 import json
 import os
+import re
 import secrets
 import socket
 import sys
@@ -28,6 +29,13 @@ from pathlib import Path
 IDLE_TIMEOUT = 900     # 15 minutes with no requests, then exit
 STARTUP_GRACE = 180    # a lock younger than this means another daemon is loading
 MAX_REQUEST = 64 * 1024
+MAX_TEXT = 8 * 1024    # far beyond any spoken summary; bounds CPU on the single-threaded loop
+
+# The only filenames a client may write: per-session summaries, the voice-picker
+# preview, and the installer's warmup probe. Everything else in the state dir is
+# control state (kokoro.port, kokoro.lock, voice flags) that WAV bytes must
+# never be able to overwrite.
+_OUT_NAME = re.compile(r"^(say\.[A-Za-z0-9_.-]{1,128}|preview|warmup)\.wav$")
 
 
 def read_port_file(state):
@@ -101,10 +109,13 @@ def write_port_file(port_file, port, token):
 
 
 def safe_output_path(state, raw):
-    """Only allow writes directly inside the state dir, so a request cannot
-    aim the synthesiser at an arbitrary file."""
+    """Only allow writes directly inside the state dir, under an allowlisted
+    synthesis filename, so a request cannot aim the synthesiser at an
+    arbitrary file or at the daemon's own control files."""
     path = Path(raw)
     if not path.is_absolute():
+        return None
+    if not _OUT_NAME.match(path.name):
         return None
     try:
         if path.resolve().parent != state.resolve():
@@ -131,6 +142,8 @@ def serve(state, sock, token, engine):
                     if not chunk:
                         break
                     buf += chunk
+                if len(buf) >= MAX_REQUEST:
+                    continue          # oversized request body; drop before parsing
                 req = json.loads(buf.decode("utf-8", "replace").strip() or "{}")
             except Exception:
                 continue
@@ -153,6 +166,8 @@ def serve(state, sock, token, engine):
                     reply = {"ok": False, "error": "output path not permitted"}
                 elif not text:
                     reply = {"ok": False, "error": "empty text"}
+                elif len(text) > MAX_TEXT:
+                    reply = {"ok": False, "error": "text too long"}
                 else:
                     try:
                         engine.synth_to_wav(

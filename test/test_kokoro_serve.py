@@ -6,8 +6,10 @@ the stdlib: kokoro_serve defers the kokoro import until main(), so importing
 the module for testing needs no ML dependencies.
 """
 
+import socket
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -36,6 +38,20 @@ class SafeOutputPath(unittest.TestCase):
     def test_rejects_other_absolute_directory(self):
         other = Path(tempfile.mkdtemp(prefix="av-other-"))
         self.assertIsNone(kokoro_serve.safe_output_path(self.state, str(other / "say.x.wav")))
+
+    def test_rejects_control_filenames(self):
+        # A token holder must not be able to overwrite the daemon's own state.
+        for name in ("kokoro.port", "kokoro.lock", "voice-on", "on.abc", "say.wav", "say..wav.exe"):
+            self.assertIsNone(
+                kokoro_serve.safe_output_path(self.state, str(self.state / name)),
+                f"{name} must be rejected",
+            )
+
+    def test_accepts_preview_and_warmup(self):
+        # pick-voice writes preview.wav, the installers probe with warmup.wav.
+        for name in ("preview.wav", "warmup.wav"):
+            raw = str(self.state / name)
+            self.assertEqual(kokoro_serve.safe_output_path(self.state, raw), Path(raw))
 
     def test_rejects_symlink_escape(self):
         outside = Path(tempfile.mkdtemp(prefix="av-outside-"))
@@ -75,6 +91,84 @@ class PortFile(unittest.TestCase):
         self.assertIsNone(kokoro_serve.read_port_file(state))
         (state / "kokoro.port").write_text("not a port line at all", encoding="utf-8")
         self.assertIsNone(kokoro_serve.read_port_file(state))
+
+
+class FakeEngine:
+    DEFAULT_VOICE = "fake"
+    DEFAULT_SPEED = 1.0
+
+    def synth_to_wav(self, text, out, voice=None, speed=None):
+        Path(out).write_bytes(b"RIFF-fake-wav")
+
+
+class Serve(unittest.TestCase):
+    """Drives serve() over a real loopback socket with a fake engine."""
+
+    def setUp(self):
+        self.state = Path(tempfile.mkdtemp(prefix="av-state-"))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.token = "test-token"
+        self.thread = threading.Thread(
+            target=kokoro_serve.serve,
+            args=(self.state, self.sock, self.token, FakeEngine()),
+            daemon=True,
+        )
+        self.thread.start()
+
+    def tearDown(self):
+        try:
+            kokoro_serve.request(self.port, self.token, {"cmd": "quit"}, timeout=2)
+        except Exception:
+            pass
+        self.thread.join(timeout=5)
+        self.sock.close()
+
+    def ask(self, payload):
+        return kokoro_serve.request(self.port, self.token, payload, timeout=5)
+
+    def test_ping(self):
+        self.assertTrue(self.ask({"cmd": "ping"}).get("ok"))
+
+    def test_bad_token(self):
+        reply = kokoro_serve.request(self.port, "wrong", {"cmd": "ping"}, timeout=5)
+        self.assertFalse(reply.get("ok"))
+        self.assertEqual(reply.get("error"), "bad token")
+
+    def test_synth_writes_allowed_file(self):
+        out = self.state / "say.test.wav"
+        reply = self.ask({"cmd": "synth", "text": "hello", "out": str(out)})
+        self.assertTrue(reply.get("ok"), reply)
+        self.assertTrue(out.exists())
+
+    def test_synth_refuses_control_file(self):
+        out = self.state / "kokoro.port"
+        reply = self.ask({"cmd": "synth", "text": "hello", "out": str(out)})
+        self.assertFalse(reply.get("ok"))
+        self.assertEqual(reply.get("error"), "output path not permitted")
+        self.assertFalse(out.exists())
+
+    def test_synth_refuses_oversized_request_body(self):
+        # 100 KB overflows MAX_REQUEST; the server drops the connection without
+        # synthesising. The client may see a reset mid-send, an empty reply, or
+        # an error: all are rejections. The property that matters is no file.
+        out = self.state / "say.test.wav"
+        try:
+            reply = self.ask({"cmd": "synth", "text": "x" * (100 * 1024), "out": str(out)})
+            self.assertFalse(reply.get("ok"))
+        except OSError:
+            pass
+        self.assertFalse(out.exists())
+
+    def test_synth_refuses_oversized_text(self):
+        # Fits in MAX_REQUEST but exceeds MAX_TEXT: must hit the explicit limit.
+        out = self.state / "say.test.wav"
+        reply = self.ask({"cmd": "synth", "text": "y" * (9 * 1024), "out": str(out)})
+        self.assertFalse(reply.get("ok"))
+        self.assertEqual(reply.get("error"), "text too long")
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":
