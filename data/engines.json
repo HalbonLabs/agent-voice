@@ -1,0 +1,37 @@
+{
+  "engines": [
+    {
+      "id": "edge",
+      "listLine": "free, natural, summary text sent to Microsoft",
+      "defaultVoice": "en-US-AvaNeural",
+      "defaultSpeed": 1.15
+    },
+    {
+      "id": "kokoro",
+      "listLine": "free, natural, fully local, 54 voices",
+      "defaultVoice": "bf_emma",
+      "defaultSpeed": 1.15
+    },
+    {
+      "id": "elevenlabs",
+      "listLine": "best quality, needs your API key",
+      "defaultVoice": "JBFqnCBsd6RMkjVDRZzb",
+      "defaultModel": "eleven_flash_v2_5",
+      "defaultSpeed": 1.0
+    },
+    {
+      "id": "native",
+      "listLine": "robotic, no dependencies, no network",
+      "defaultVoice": "system default",
+      "defaultSpeed": 1.2
+    }
+  ],
+  "edgeShortlist": [
+    { "id": "en-GB-SoniaNeural", "desc": "British female" },
+    { "id": "en-GB-RyanNeural", "desc": "British male" },
+    { "id": "en-US-AvaNeural", "desc": "American female" },
+    { "id": "en-US-AndrewNeural", "desc": "American male" },
+    { "id": "en-AU-NatashaNeural", "desc": "Australian female" },
+    { "id": "en-IE-EmilyNeural", "desc": "Irish female" }
+  ]
+}
