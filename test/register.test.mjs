@@ -138,6 +138,44 @@ test('unknown provider is reported, not fatal', () => {
   assert.equal(existsSync(join(home, '.claude', 'settings.json')), true);
 });
 
+test('a foreign hook whose path merely contains "agent-voice" survives (R-09)', () => {
+  const home = fakeHome();
+  const foreign = {
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: 'bash /home/u/projects/agent-voice/notify.sh' }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node C:\\repos\\my-agent-voice-fork\\hook.mjs' }] }],
+    },
+  };
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify(foreign, null, 2));
+  install(home, 'claude');
+  uninstall(home, 'claude');
+  assert.deepEqual(readSettings(home), foreign, 'foreign hooks must never be treated as ours');
+});
+
+test('legacy unmarked entries at the real install path are still cleaned up (R-09)', () => {
+  const home = fakeHome();
+  // What a pre-marker version wrote: no _agentVoice key, path under ~/.agent-voice.
+  const legacy = {
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: 'powershell.exe', args: ['-File', 'C:\\Users\\u\\.agent-voice\\speak.ps1'], async: true }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'bash', args: ['/Users/u/.agent-voice/voice-context.sh'], timeout: 10 }] }],
+    },
+  };
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify(legacy, null, 2));
+  uninstall(home, 'claude');
+  assert.deepEqual(readSettings(home), {}, 'legacy entries must be removed on uninstall');
+});
+
+test('installed entries carry the explicit ownership marker (R-09)', () => {
+  const home = fakeHome();
+  install(home, 'claude');
+  const s = readSettings(home);
+  assert.match(s.hooks.Stop[0].hooks[0]._agentVoice, /^agent-voice@\d+\.\d+\.\d+$/);
+  assert.match(s.hooks.UserPromptSubmit[0].hooks[0]._agentVoice, /^agent-voice@\d+\.\d+\.\d+$/);
+});
+
 test('first install backs up the pre-agent-voice original', () => {
   const home = fakeHome();
   const original = JSON.stringify({ model: 'opus' }, null, 2);
