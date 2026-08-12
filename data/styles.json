@@ -1,0 +1,41 @@
+{
+  "default": "plain",
+  "styles": [
+    {
+      "id": "plain",
+      "listLine": "short everyday words, the delta only, no filler",
+      "rules": [
+        "Use short, everyday words only; no big words, no jargon, no filler, no pleasantries.",
+        "Say only the delta: what changed since my last message, and nothing else.",
+        "1 or 2 short sentences at most."
+      ]
+    },
+    {
+      "id": "standard",
+      "listLine": "a rounded summary in normal words",
+      "rules": [
+        "Plain conversational prose.",
+        "State what changed since my last message and what decision I need to make, if any.",
+        "2 to 3 sentences."
+      ]
+    },
+    {
+      "id": "technical",
+      "listLine": "precise technical terms, still no filler",
+      "rules": [
+        "Precise technical terminology is fine; name the real things.",
+        "State what changed and what decision I need to make; no filler, no pleasantries.",
+        "2 to 4 sentences."
+      ]
+    },
+    {
+      "id": "detailed",
+      "listLine": "fuller picture: what, why, and what is next",
+      "rules": [
+        "Cover what changed, why it changed, and what happens next.",
+        "Plain prose, no filler; technical terms only where they earn their place.",
+        "Up to 5 short sentences."
+      ]
+    }
+  ]
+}

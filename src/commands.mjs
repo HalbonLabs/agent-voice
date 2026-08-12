@@ -12,6 +12,7 @@ import { join } from 'path';
 import {
   rootDir, resolveSession, defaultVoice, defaultSpeed,
   ENGINE_IDS, EDGE_SHORTLIST, enginesData, libFile,
+  voiceStyle, stylesData, STYLE_IDS,
 } from './config.mjs';
 import { platform } from './platform/index.mjs';
 import { stopAll } from './stop.mjs';
@@ -64,6 +65,7 @@ export function handleCommand(prompt, sid, home) {
       '  voice pick              browse voices with arrows and P, in a new window',
       '  voice speed             list speeds, then: voice speed 1.5',
       '  voice when              when to speak: always, problem, question, long, never',
+      '  voice style             how summaries are written: plain, standard, technical, detailed',
       '  voice snooze [mins]     mute all audio everywhere for a while (default 30)',
       '  voice last              why the last turn did or did not speak',
       '  voice list              same as voice model, lists what is available',
@@ -101,11 +103,41 @@ export function handleCommand(prompt, sid, home) {
     say(`  speed   ${s.speed}x (${s.speedFrom === 'session' ? 'this session' : 'default'}, 1.0 is normal)`);
     const w = whenMode(sid, home);
     say(`  when    ${w.mode} (${w.from === 'session' ? 'this session' : 'default'})`);
+    const sty = voiceStyle(sid, home);
+    say(`  style   ${sty.id} (${sty.from === 'session' ? 'this session' : 'default'})`);
     const snoozed = snoozeUntil(home);
     if (Date.now() < snoozed) {
       say(`  snooze  all audio muted for another ${Math.ceil((snoozed - Date.now()) / 60000)} min (voice snooze off to end)`);
     }
     if (engine === 'elevenlabs') say('  note    ElevenLabs ignores speed; it has no rate control in this integration.');
+    return done();
+  }
+
+  if ((m = cmd.match(/^voice style\b(.*)$/))) {
+    let arg = m[1].trim();
+    const styleFlag = join(p.state, `style.${sid}`);
+    if (/^\d+$/.test(arg)) {
+      const id = STYLE_IDS[Number(arg) - 1];
+      if (id) arg = id;
+    }
+    if (!arg) {
+      const cur = voiceStyle(sid, home).id;
+      say('agent-voice: how should the spoken summary be written?');
+      stylesData.styles.forEach((s, i) => {
+        say(`  ${s.id === cur ? '*' : ' '} ${i + 1}. ${s.id.padEnd(10)} ${s.listLine}`);
+      });
+      say("  * is in use now. Choose with: voice style 1   (or: voice style plain; reset: voice style default)");
+      return done();
+    }
+    if (arg === 'default') {
+      rm(styleFlag);
+      say(`agent-voice: style override cleared; back to ${voiceStyle(sid, home).id}.`);
+    } else if (STYLE_IDS.includes(arg)) {
+      writeFileSync(styleFlag, arg);
+      say(`agent-voice: summaries in this session are now written '${arg}'. Takes effect from the next reply.`);
+    } else {
+      say(`agent-voice: unknown style '${arg}'. Choose from: ${STYLE_IDS.join(' ')}, or 'default'.`);
+    }
     return done();
   }
 

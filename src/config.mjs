@@ -46,6 +46,24 @@ export function engineMeta(id) {
   return enginesData.engines.find(e => e.id === id) || enginesData.engines.find(e => e.id === 'native');
 }
 
+// Spoken-summary styles: how the model is told to WRITE the summary, from
+// "short everyday words, delta only" up to a fuller picture. Data, not code,
+// so adding one is an entry in data/styles.json.
+export const stylesData = JSON.parse(readFileSync(dataFile('styles.json'), 'utf8'));
+export const STYLE_IDS = stylesData.styles.map(s => s.id);
+
+export function voiceStyle(sid, home = homedir()) {
+  if (sid) {
+    try {
+      const v = readFileSync(join(stateDir(home), `style.${sid}`), 'utf8').trim();
+      if (STYLE_IDS.includes(v)) return { id: v, from: 'session' };
+    } catch { /* no session override */ }
+  }
+  const cfg = readConfig(home);
+  if (STYLE_IDS.includes(cfg.voice_style)) return { id: cfg.voice_style, from: 'default' };
+  return { id: stylesData.default, from: 'default' };
+}
+
 // key=value, hash comments, later duplicates win (matching the old sed|tail -1).
 export function readConfig(home = homedir()) {
   const path = join(rootDir(home), 'config');

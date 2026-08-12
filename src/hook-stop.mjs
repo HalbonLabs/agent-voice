@@ -88,6 +88,8 @@ function main(payload) {
     voice: s.voice,
     speed: s.speed,
     model: s.cfg.eleven_model || engineMeta('elevenlabs').defaultModel,
+    // Breath between streamed sentences; voice_pause_ms=0 disables.
+    pauseMs: s.cfg.voice_pause_ms === undefined ? 250 : Number(s.cfg.voice_pause_ms) || 0,
     nativeVoice: defaultVoice('native', s.cfg),
     python: s.python,
     mp3: p.mp3,

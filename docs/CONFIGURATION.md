@@ -73,6 +73,8 @@ you change these in-session instead; the file sets the machine-wide default.
 | `eleven_voice`, `eleven_model` | ElevenLabs | a voice id from your account |
 | `native_voice` | Native, macOS | an installed system voice |
 | `voice_speed` | all | `1.25`, overrides the per-engine speed |
+| `voice_style` | wording | `plain` (default) / `standard` / `technical` / `detailed` |
+| `voice_pause_ms` | audio | breath between spoken sentences on streamed engines (default 250, 0 disables) |
 | `voice_when` | policy | `always` / `problem` / `question` / `long` / `never` |
 | `voice_long_secs` | policy | threshold for `long` mode (default 45) |
 | `voice_min_secs` | policy | turns shorter than this are earcon-only outside `always` (default 15, 0 disables) |

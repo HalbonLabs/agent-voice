@@ -5,24 +5,36 @@ import { writeFileSync, appendFileSync, existsSync, readdirSync, statSync, unlin
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { getField } from '../lib/json-get.mjs';
-import { avHome, ensureStateDir, clampSid, sessionMode, readConfig, resolveSession, rootDir } from './config.mjs';
+import {
+  avHome, ensureStateDir, clampSid, sessionMode, readConfig, resolveSession, rootDir,
+  voiceStyle, stylesData,
+} from './config.mjs';
 import { handleCommand } from './commands.mjs';
 import { snapshotTurn } from './facts.mjs';
 
 // The structured contract (P2-4). The intent attribute drives the earcon and
 // the silence policy; forbidding the model from reporting metrics stops it
 // inventing numbers, since the facts are measured independently (P2-1) and
-// spoken first.
-const CONTRACT = `Voice mode is active. End every reply with, on its own line:
-<spoken intent="done|question|blocked|failed">
-2 to 3 sentences of plain prose, written to be heard, not read. No markdown,
-no code, no file paths, no lists, no symbols. Say what you decided or what you
-need from me, in plain words. Do NOT state file counts, line counts, or test
-results: those are measured independently and will be spoken for you. Do not
-claim success; say what you did. Pick the intent honestly: question if you
-need a decision, blocked if you cannot proceed, failed if it did not work,
-done otherwise.
-</spoken>`;
+// spoken first. The writing rules in the middle come from the selected style
+// (voice style: plain by default), so the same skeleton can ask for anything
+// from "short everyday words, delta only" to a fuller picture.
+function buildContract(styleId) {
+  const style = stylesData.styles.find(s => s.id === styleId) || stylesData.styles[0];
+  return [
+    'Voice mode is active. End every reply with, on its own line:',
+    '<spoken intent="done|question|blocked|failed">',
+    'Prose written to be heard, not read. No markdown, no code, no file paths,',
+    'no lists, no symbols.',
+    ...style.rules,
+    'One subject per sentence: when there are several things to say, give each',
+    'its own short sentence rather than one long one.',
+    'Do NOT state file counts, line counts, or test results: those are measured',
+    'independently and will be spoken for you. Do not claim success; say what',
+    'you did. Pick the intent honestly: question if you need a decision, blocked',
+    'if you cannot proceed, failed if it did not work, done otherwise.',
+    '</spoken>',
+  ].join('\n');
+}
 
 // --agent=<id> marks agents whose injection protocol differs from Claude
 // Code's. Gemini injects ONLY via JSON stdout with a BeforeAgent event name;
@@ -34,7 +46,7 @@ const EVENT_NAME = agentFlag === 'gemini' ? 'BeforeAgent' : 'UserPromptSubmit';
 // id. A sweep of week-old files runs at most once a day, costing one readdir.
 const GC_INTERVAL_MS = 24 * 3600 * 1000;
 const GC_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
-const GC_PATTERN = /^(on|off|text|engine|speed|voice|when|active|turn|speak|job|say)\./;
+const GC_PATTERN = /^(on|off|text|engine|speed|voice|when|style|active|turn|speak|job|say)\./;
 
 function sweepStaleState(state) {
   const stamp = join(state, 'last-gc');
@@ -124,12 +136,13 @@ function main(payload) {
       c.unref();
     }
 
+    const contract = buildContract(voiceStyle(sid, home).id);
     if (agentFlag === 'gemini') {
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: EVENT_NAME, additionalContext: CONTRACT },
+        hookSpecificOutput: { hookEventName: EVENT_NAME, additionalContext: contract },
       }) + '\n');
     } else {
-      process.stdout.write(CONTRACT + '\n');
+      process.stdout.write(contract + '\n');
     }
   }
 }

@@ -10,6 +10,7 @@ import { rootDir, stopRequestedSince } from './config.mjs';
 
 // A "wav" under this size is a header with no audio in it.
 const MIN_AUDIO_BYTES = 500;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function producedAudio(file) {
   try { return existsSync(file) && statSync(file).size > MIN_AUDIO_BYTES; } catch { return false; }
@@ -74,7 +75,13 @@ async function speakKokoro(job) {
       }
       return true;
     }
-    if (playing) await playing;
+    if (playing) {
+      await playing;
+      // A breath between subjects (one subject per sentence, per the
+      // contract), so a long summary is not one continuous wall of speech.
+      const pause = Number(job.pauseMs);
+      if (pause > 0) await sleep(Math.min(pause, 2000));
+    }
     if (stopped()) return true;
     playing = platform.playAsync(wavPath, job.python).then(done => { cleanup(wavPath); return done; });
     spokeAny = true;
