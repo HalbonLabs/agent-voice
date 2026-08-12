@@ -17,6 +17,9 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 # --- copy runtime files ---
 New-Item -ItemType Directory -Force -Path $state | Out-Null
+# Owner-only ACL on the state dir: kokoro.port in here carries the daemon token.
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+icacls $state /inheritance:r /grant:r "*${me}:(OI)(CI)F" | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $target 'lib') | Out-Null
 Copy-Item (Join-Path $src 'core\windows\*') $target -Force
 Copy-Item (Join-Path $src 'core\kokoro*.py') $target -Force

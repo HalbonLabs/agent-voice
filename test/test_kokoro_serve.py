@@ -54,6 +54,22 @@ class PortFile(unittest.TestCase):
         (state / "kokoro.port").write_text("54321 deadbeef", encoding="utf-8")
         self.assertEqual(kokoro_serve.read_port_file(state), (54321, "deadbeef"))
 
+    def test_write_port_file_roundtrip_and_no_temp_left(self):
+        state = Path(tempfile.mkdtemp(prefix="av-state-"))
+        port_file = state / "kokoro.port"
+        kokoro_serve.write_port_file(port_file, 54321, "deadbeef")
+        self.assertEqual(kokoro_serve.read_port_file(state), (54321, "deadbeef"))
+        self.assertFalse(port_file.with_suffix(".port.tmp").exists())
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX mode bits are meaningless on Windows")
+    def test_port_file_is_owner_only(self):
+        import stat
+
+        state = Path(tempfile.mkdtemp(prefix="av-state-"))
+        port_file = state / "kokoro.port"
+        kokoro_serve.write_port_file(port_file, 54321, "deadbeef")
+        self.assertEqual(stat.S_IMODE(port_file.stat().st_mode), 0o600)
+
     def test_read_port_file_missing_or_garbled(self):
         state = Path(tempfile.mkdtemp(prefix="av-state-"))
         self.assertIsNone(kokoro_serve.read_port_file(state))

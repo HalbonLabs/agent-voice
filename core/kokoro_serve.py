@@ -88,6 +88,18 @@ def take_lock(state):
     return False
 
 
+def write_port_file(port_file, port, token):
+    """Publish "<port> <token>" atomically and owner-readable only. The token
+    is the only thing keeping other local users off the daemon, so the file is
+    created 0600 from the start: a chmod after write would leave a window where
+    it exists world-readable under the default umask."""
+    tmp = port_file.with_suffix(".port.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(f"{port} {token}")
+    os.replace(tmp, port_file)  # atomic: readers never see a partial file
+
+
 def safe_output_path(state, raw):
     """Only allow writes directly inside the state dir, so a request cannot
     aim the synthesiser at an arbitrary file."""
@@ -202,9 +214,7 @@ def main() -> int:
         sock.listen(8)
         token = secrets.token_hex(16)
 
-        tmp = port_file.with_suffix(".port.tmp")
-        tmp.write_text(f"{sock.getsockname()[1]} {token}", encoding="utf-8")
-        os.replace(tmp, port_file)      # atomic: readers never see a partial file
+        write_port_file(port_file, sock.getsockname()[1], token)
 
         with sock:
             serve(state, sock, token, engine)

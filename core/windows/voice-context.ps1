@@ -9,7 +9,12 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $root  = Join-Path $env:USERPROFILE '.agent-voice'
 $state = Join-Path $root 'state'
-New-Item -ItemType Directory -Force -Path $state | Out-Null
+if (-not (Test-Path $state)) {
+  New-Item -ItemType Directory -Force -Path $state | Out-Null
+  # Owner-only ACL: kokoro.port in here carries the daemon token.
+  $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  icacls $state /inheritance:r /grant:r "*${me}:(OI)(CI)F" | Out-Null
+}
 
 $ENGINES = @('edge', 'kokoro', 'elevenlabs', 'native')
 $SPEED_MIN = 0.5

@@ -9,6 +9,7 @@
 ROOT="$HOME/.agent-voice"
 STATE="$ROOT/state"
 mkdir -p "$STATE"
+chmod 700 "$STATE" 2>/dev/null  # owner-only: kokoro.port in here carries the daemon token
 
 ENGINES="edge kokoro elevenlabs native"
 # The numbered edge-tts shortlist, kept next to its display so they cannot diverge.

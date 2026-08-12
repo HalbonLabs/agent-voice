@@ -6,6 +6,7 @@
 ROOT="$HOME/.agent-voice"
 STATE="$ROOT/state"
 mkdir -p "$STATE"
+chmod 700 "$STATE" 2>/dev/null  # owner-only: kokoro.port in here carries the daemon token
 
 # Load config (simple key=value file; safe to source, values have no spaces).
 [ -f "$ROOT/config" ] && . "$ROOT/config"

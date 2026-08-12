@@ -19,6 +19,8 @@ fi
 
 # Copy runtime files.
 mkdir -p "$STATE" "$TARGET/lib"
+# Owner-only: the Kokoro port file in here carries the daemon token.
+chmod 700 "$STATE"
 cp -f "$SRC/core/macos/"* "$TARGET/"
 cp -f "$SRC/core/"kokoro*.py "$TARGET/"
 cp -f "$SRC/lib/"* "$TARGET/lib/"
