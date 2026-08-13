@@ -13,11 +13,12 @@ function fakeHome() {
 // how register.mjs recognises its own entries (fragile by design; see R-09).
 const SCRIPTS = join(tmpdir(), '.agent-voice', 'core', 'windows');
 
+// Both return main's failure count, so a test can assert on it.
 function install(home, providers, platform = 'win') {
-  main([`mode=install`, `home=${home}`, `platform=${platform}`, `scripts=${SCRIPTS}`, `providers=${providers}`]);
+  return main([`mode=install`, `home=${home}`, `platform=${platform}`, `scripts=${SCRIPTS}`, `providers=${providers}`]);
 }
 function uninstall(home, providers) {
-  main([`mode=uninstall`, `home=${home}`, `providers=${providers}`]);
+  return main([`mode=uninstall`, `home=${home}`, `providers=${providers}`]);
 }
 const readSettings = home => JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
 
@@ -239,4 +240,34 @@ test('forms maps both hooks to their node entry points', () => {
   const prompt = forms('voice-context', 'mac', '/opt/scripts');
   assert.equal(prompt.argv.command, 'node');
   assert.deepEqual(prompt.argv.args, [join('/opt/scripts', 'src', 'hook-prompt.mjs')]);
+});
+
+// main() returns the number of providers it could NOT register, and the entry
+// point turns any non-zero into exit 1. The installers check that exit code
+// before printing "Done.", so a count that under-reports here is what lets a
+// failed install claim success.
+test('a clean install reports no failures', () => {
+  const home = fakeHome();
+  assert.equal(install(home, 'claude'), 0);
+});
+
+test('an unknown provider is counted as a failure', () => {
+  const home = fakeHome();
+  assert.equal(install(home, 'not-a-real-agent'), 1);
+});
+
+test('an unparseable target config is counted as a failure', () => {
+  const home = fakeHome();
+  // A live config we cannot parse is skipped rather than clobbered, which is
+  // correct — but skipping is a failure to register, not a success.
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'settings.json'), '{ this is not json');
+  assert.equal(install(home, 'claude'), 1);
+});
+
+test('one bad provider does not mask the ones that worked', () => {
+  const home = fakeHome();
+  // Two named, one bogus: the good one still registers, and the count is 1.
+  assert.equal(install(home, 'claude,not-a-real-agent'), 1);
+  assert.equal(oursIn(readSettings(home).hooks.Stop).length, 1);
 });

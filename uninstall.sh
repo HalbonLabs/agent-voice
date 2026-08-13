@@ -14,9 +14,17 @@ if [ -f "$TARGET/kokoro_serve.py" ]; then
   "$quit_py" "$TARGET/kokoro_serve.py" "$TARGET/state" --quit >/dev/null 2>&1 || true
 fi
 
+unregistered=1
 if [ -f "$TARGET/lib/register.mjs" ]; then
-  node "$TARGET/lib/register.mjs" mode=uninstall home="$HOME"
+  if ! node "$TARGET/lib/register.mjs" mode=uninstall home="$HOME"; then
+    unregistered=0
+    echo ""
+    echo "Hook removal FAILED for at least one agent. The error above is the real one."
+    echo "Deleting the files now would leave those hooks pointing at scripts that no"
+    echo "longer exist, so they would fail on every turn instead of doing nothing."
+  fi
 else
+  unregistered=0
   echo "register.mjs not found; edit your agent config(s) by hand to remove agent-voice hooks."
 fi
 
@@ -33,7 +41,14 @@ if [ "$ans" = "y" ]; then
     /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
     echo "Removed the Stop agent-voice Quick Action"
   fi
-else
+elif [ "$unregistered" = 1 ]; then
   echo "Left ~/.agent-voice in place (hooks removed)."
+else
+  echo "Left ~/.agent-voice in place. Hooks were NOT fully removed, see above."
 fi
-echo "Reload open agent sessions to drop the hooks."
+if [ "$unregistered" = 1 ]; then
+  echo "Reload open agent sessions to drop the hooks."
+else
+  echo "Remove the remaining agent-voice hooks by hand, then reload open agent sessions."
+  exit 1
+fi
