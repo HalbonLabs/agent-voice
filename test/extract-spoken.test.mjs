@@ -56,6 +56,15 @@ test('a closed block still wins over an earlier unclosed one', () => {
   assert.equal(run('<spoken>unclosed\n\n<spoken>closed</spoken>'), 'closed');
 });
 
+// The recovery must never outrank a block that was written correctly. A reply
+// that closes its block and then mentions the tag again in passing still has a
+// real message, and speaking the trailing fragment instead would be worse than
+// the silence this recovery exists to fix: silence is visibly wrong, confidently
+// speaking the wrong words is not.
+test('a closed block is not shadowed by a later stray unclosed tag', () => {
+  assert.equal(run('<spoken>real message</spoken> later I mention <spoken>the syntax'), 'real message');
+});
+
 test('empty block prints empty', () => {
   assert.equal(run('reply <spoken>   </spoken>'), '');
 });
