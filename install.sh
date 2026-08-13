@@ -550,9 +550,18 @@ echo "Speech policy: speaks only for question / blocked / failed turns; a short"
 echo "tone marks every other turn. Type 'voice when always' in a session for"
 echo "speech on every turn, or 'voice when' to see the options."
 
-# Register hooks into the chosen agents.
+# Register hooks into the chosen agents. This is the step that makes agent-voice
+# do anything at all, so a failure here must not be followed by "Done." — an
+# install that copies the files but registers no hooks looks identical to a
+# working one until the user notices nothing ever speaks.
 echo ""
-node "$TARGET/lib/register.mjs" mode=install home="$HOME" platform=mac scripts="$TARGET" providers="$agents"
+if ! node "$TARGET/lib/register.mjs" mode=install home="$HOME" platform=mac scripts="$TARGET" providers="$agents"; then
+  echo ""
+  echo "Hook registration FAILED. The files are installed but no agent is wired up,"
+  echo "so nothing will speak. The error above is the real one."
+  echo "Fix it and re-run this installer; registration is idempotent."
+  exit 1
+fi
 
 install_mac_quick_action
 
