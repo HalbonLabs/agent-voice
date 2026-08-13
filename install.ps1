@@ -360,8 +360,19 @@ Write-Host "tone marks every other turn. Type 'voice when always' in a session f
 Write-Host "speech on every turn, or 'voice when' to see the options." -ForegroundColor Gray
 
 # --- register hooks into the chosen agents ---
+# This is the step that makes agent-voice do anything at all, so a failure here
+# must not be followed by 'Done.' - an install that copies the files but
+# registers no hooks looks identical to a working one until the user notices
+# nothing ever speaks.
 Write-Host ''
 node (Join-Path $target 'lib\register.mjs') mode=install home=$env:USERPROFILE platform=win scripts=$target providers=$agents
+if ($LASTEXITCODE -ne 0) {
+  Write-Host ''
+  Write-Host 'Hook registration FAILED. The files are installed but no agent is wired up,' -ForegroundColor Red
+  Write-Host 'so nothing will speak. The error above is the real one.' -ForegroundColor Red
+  Write-Host 'Fix it and re-run this installer; registration is idempotent.' -ForegroundColor Red
+  exit 1
+}
 
 # --- global stop hotkey: Ctrl+Alt+S ---
 try {

@@ -210,7 +210,9 @@ find_python() {
   for c in python3.13 python3.12 python3.11 python3.10 \
            python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
     p="$(command -v "$c" 2>/dev/null)" || continue
-    [ -n "$p" ] && [ -x "$p" ] || continue
+    # An if, not `A && B || continue`: that form runs C whenever A is false OR
+    # B is false, which reads as if-then-else and is not one (shellcheck SC2015).
+    if [ -z "$p" ] || [ ! -x "$p" ]; then continue; fi
     if "$p" -c "import sys; sys.exit(0 if ($want_maj, $want_min) <= sys.version_info[:2] <= ($max_maj, $max_min) else 1)" >/dev/null 2>&1; then
       printf '%s' "$p"; return 0
     fi
@@ -550,9 +552,18 @@ echo "Speech policy: speaks only for question / blocked / failed turns; a short"
 echo "tone marks every other turn. Type 'voice when always' in a session for"
 echo "speech on every turn, or 'voice when' to see the options."
 
-# Register hooks into the chosen agents.
+# Register hooks into the chosen agents. This is the step that makes agent-voice
+# do anything at all, so a failure here must not be followed by "Done." — an
+# install that copies the files but registers no hooks looks identical to a
+# working one until the user notices nothing ever speaks.
 echo ""
-node "$TARGET/lib/register.mjs" mode=install home="$HOME" platform=mac scripts="$TARGET" providers="$agents"
+if ! node "$TARGET/lib/register.mjs" mode=install home="$HOME" platform=mac scripts="$TARGET" providers="$agents"; then
+  echo ""
+  echo "Hook registration FAILED. The files are installed but no agent is wired up,"
+  echo "so nothing will speak. The error above is the real one."
+  echo "Fix it and re-run this installer; registration is idempotent."
+  exit 1
+fi
 
 install_mac_quick_action
 

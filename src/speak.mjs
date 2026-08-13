@@ -10,7 +10,7 @@
 // follow. The speaking lock ensures at most one session's words at a time:
 // cut-through intents queue behind it, everything else downgrades to the
 // earcon. A shush at any point ends everything via the stop marker.
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { speak } from './engines.mjs';
 import {
@@ -72,8 +72,16 @@ try {
 
   if (process.env.AGENT_VOICE_NO_AUDIO === '1') {
     try {
-      writeFileSync(join(stateDirPath, 'last-job.json'),
+      // Temp file then rename, because the only readers are other processes
+      // polling for this path to appear. A plain writeFileSync creates the
+      // file and fills it as two steps, so a reader that wakes between them
+      // sees an empty file and dies on JSON.parse. rename is atomic, so the
+      // path never exists in a half-written state.
+      const jobPath = join(stateDirPath, 'last-job.json');
+      const tmpPath = jobPath + '.tmp';
+      writeFileSync(tmpPath,
         JSON.stringify({ ...job, policy: decision, notify: notifying, push: pushing }, null, 2));
+      renameSync(tmpPath, jobPath);
     } catch { /* fine */ }
     recordDecision(decision, decision.speech);
     // Push still runs in dry mode when configured: the tests point ntfy at a
