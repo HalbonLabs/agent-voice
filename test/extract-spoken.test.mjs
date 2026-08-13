@@ -65,6 +65,15 @@ test('a closed block is not shadowed by a later stray unclosed tag', () => {
   assert.equal(run('<spoken>real message</spoken> later I mention <spoken>the syntax'), 'real message');
 });
 
+// Pins the reason the tail's closing-tag check is not dead code. A bare
+// "<spoken" with no ">" trips BLOCK's lookahead without being able to open a
+// block itself, so nothing matches strictly and recovery is reached; the check
+// then declines it because a real closing tag is present. Staying silent is
+// correct here, since there is no way to tell which fragment was meant.
+test('a malformed inner fragment does not get recovered as a block', () => {
+  assert.equal(run('<spoken intent="done"><spoken</spoken></spoken>'), '');
+});
+
 test('empty block prints empty', () => {
   assert.equal(run('reply <spoken>   </spoken>'), '');
 });
