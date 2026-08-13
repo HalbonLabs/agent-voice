@@ -19,19 +19,19 @@ if (Test-Path $serve) {
   & $py $serve (Join-Path $target 'state') --quit 2>$null
 }
 
-$unregistered = $true
+$hooksRemoved = $true
 $reg = Join-Path $target 'lib\register.mjs'
 if (Test-Path $reg) {
   node $reg mode=uninstall home=$env:USERPROFILE
   if ($LASTEXITCODE -ne 0) {
-    $unregistered = $false
+    $hooksRemoved = $false
     Write-Host ''
     Write-Host 'Hook removal FAILED for at least one agent. The error above is the real one.' -ForegroundColor Red
     Write-Host 'Deleting the files now would leave those hooks pointing at scripts that no' -ForegroundColor Red
     Write-Host 'longer exist, so they would fail on every turn instead of doing nothing.' -ForegroundColor Red
   }
 } else {
-  $unregistered = $false
+  $hooksRemoved = $false
   Write-Host 'register.mjs not found; edit your agent config(s) by hand to remove agent-voice hooks.' -ForegroundColor Yellow
 }
 
@@ -39,9 +39,9 @@ Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\agent
 
 $ans = Read-Host 'Also delete installed files and settings at ~/.agent-voice? (y/N)'
 if ($ans -eq 'y') { Remove-Item $target -Recurse -Force; Write-Host 'Removed ~/.agent-voice' }
-elseif ($unregistered) { Write-Host 'Left ~/.agent-voice in place (hooks removed).' }
+elseif ($hooksRemoved) { Write-Host 'Left ~/.agent-voice in place (hooks removed).' }
 else { Write-Host 'Left ~/.agent-voice in place. Hooks were NOT fully removed, see above.' }
-if ($unregistered) {
+if ($hooksRemoved) {
   Write-Host 'Reload open agent sessions to drop the hooks.'
 } else {
   Write-Host 'Remove the remaining agent-voice hooks by hand, then reload open agent sessions.' -ForegroundColor Yellow
