@@ -55,6 +55,11 @@ function buildContract(styleId, humanize) {
     'you did. Pick the intent honestly: question if you need a decision, blocked',
     'if you cannot proceed, failed if it did not work, done otherwise.',
     '</spoken>',
+    // The closing tag sits at the end of a long rule list, far from the tag it
+    // closes, which is exactly the shape that gets dropped. Stating the
+    // consequence works better than showing the template: the extractor now
+    // salvages a short unclosed tail, but a long one is still discarded.
+    'Both tags are required. Write the closing </spoken> on its own line after the words.',
   ].join('\n');
 }
 
