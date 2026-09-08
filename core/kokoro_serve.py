@@ -148,6 +148,8 @@ def safe_output_path(state, raw):
     """Only allow writes directly inside the state dir, under an allowlisted
     synthesis filename, so a request cannot aim the synthesiser at an
     arbitrary file or at the daemon's own control files."""
+    if not isinstance(raw, str):
+        return None
     path = Path(raw)
     if not path.is_absolute():
         return None
@@ -181,11 +183,14 @@ def serve(state, sock, token, engine):
                 if len(buf) >= MAX_REQUEST:
                     continue          # oversized request body; drop before parsing
                 req = json.loads(buf.decode("utf-8", "replace").strip() or "{}")
+                if not isinstance(req, dict):
+                    continue      # a JSON scalar or array has no fields to read
             except Exception:
                 continue
 
             reply = {"ok": False, "error": "bad request"}
-            if not secrets.compare_digest(str(req.get("token", "")), token):
+            sent = str(req.get("token", "")).encode("utf-8")
+            if not secrets.compare_digest(sent, token.encode("utf-8")):
                 reply = {"ok": False, "error": "bad token"}
             elif req.get("cmd") == "ping":
                 reply = {"ok": True}

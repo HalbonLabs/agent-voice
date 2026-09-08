@@ -5,6 +5,17 @@ All notable changes to agent-voice. Dates are UTC.
 ## Unreleased
 
 ### Fixed
+- **Malformed requests could end the Kokoro daemon** (security review): three
+  values arriving from JSON reached code that assumed their type. A scalar or
+  array body (`1`, `[]`, `null`) met a `.get()` that sat outside the parse
+  guard; a non-ASCII token met `compare_digest`, which refuses non-ASCII
+  `str`; a non-string `out` met `Path()`. Each raised out of the accept loop
+  and ended the daemon, the first two before authentication. The body is now
+  required to be a JSON object, tokens are compared as UTF-8 bytes (still in
+  constant time), and `safe_output_path` refuses a non-string outright. No
+  data was exposed by any of the three (a lost daemon falls back to in-process
+  synthesis with the same engine and voice), but an unauthenticated local
+  caller should never have been able to stop it.
 - **The shush-restart bug** (field-reported): stopping speech mid-playback
   killed the player before the speaker, the speaker read that as a playback
   failure, and the never-silent fallback chain re-spoke the whole text from

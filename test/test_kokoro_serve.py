@@ -54,6 +54,11 @@ class SafeOutputPath(unittest.TestCase):
             raw = str(self.state / name)
             self.assertEqual(kokoro_serve.safe_output_path(self.state, raw), Path(raw))
 
+    def test_rejects_non_string(self):
+        # 'out' arrives from JSON and need not be a string; Path() would raise.
+        for raw in (1, None, {}, [], True):
+            self.assertIsNone(kokoro_serve.safe_output_path(self.state, raw), repr(raw))
+
     def test_rejects_symlink_escape(self):
         outside = Path(tempfile.mkdtemp(prefix="av-outside-"))
         link = self.state / "link"
@@ -193,6 +198,38 @@ class Serve(unittest.TestCase):
         except OSError:
             pass
         self.assertFalse(out.exists())
+
+    def raw(self, line):
+        """Send a raw line, bypassing request()'s well-formed JSON envelope."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as c:
+            c.sendall(line)
+            try:
+                return c.recv(4096)
+            except OSError:
+                return b""
+
+    def test_malformed_bodies_do_not_kill_the_daemon(self):
+        # Each of these once escaped the parse guard and unwound out of serve(),
+        # ending the daemon from an unauthenticated connection.
+        for line in (b'1\n', b'[]\n', b'"x"\n', b'null\n', b'not json\n'):
+            self.raw(line)
+            self.assertTrue(self.thread.is_alive(), f"{line!r} killed the daemon")
+        self.assertTrue(self.ask({"cmd": "ping"}).get("ok"))
+
+    def test_non_ascii_token_is_rejected_not_fatal(self):
+        # compare_digest refuses non-ASCII str, so the token must be compared
+        # as bytes: a hostile token is a rejection, not a crash.
+        reply = kokoro_serve.request(self.port, "café", {"cmd": "ping"}, timeout=5)
+        self.assertFalse(reply.get("ok"))
+        self.assertEqual(reply.get("error"), "bad token")
+        self.assertTrue(self.thread.is_alive())
+        self.assertTrue(self.ask({"cmd": "ping"}).get("ok"))
+
+    def test_synth_refuses_non_string_out(self):
+        reply = self.ask({"cmd": "synth", "text": "hello", "out": {"evil": 1}})
+        self.assertFalse(reply.get("ok"))
+        self.assertEqual(reply.get("error"), "output path not permitted")
+        self.assertTrue(self.thread.is_alive())
 
     def test_synth_refuses_oversized_text(self):
         # Fits in MAX_REQUEST but exceeds MAX_TEXT: must hit the explicit limit.
