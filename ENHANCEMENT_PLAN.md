@@ -296,7 +296,7 @@ If you are in a meeting, or your terminal is on another desktop, speech is usele
 
 ## P5-2 Push to phone
 
-For genuinely long runs, you want your pocket to buzz. Support [ntfy](https://ntfy.sh) (no account required, self-hostable, one HTTP POST) as the default, plus a generic webhook for Slack, Discord and Teams.
+For genuinely long runs, you want your pocket to buzz. Support a generic webhook for Slack, Discord and Teams. (ntfy was supported at first and removed later.)
 
 Gate it: push only on `question`, `blocked` and `failed`, and only when the turn exceeded a threshold. Nobody wants their phone buzzing for every edit. echook has webhooks already, so this is table stakes, not differentiation. Build it cheaply and move on.
 

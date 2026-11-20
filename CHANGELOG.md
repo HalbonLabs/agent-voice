@@ -4,6 +4,11 @@ All notable changes to agent-voice. Dates are UTC.
 
 ## Unreleased
 
+### Removed
+- **ntfy push.** `ntfy_topic` and `ntfy_server` are gone; problem turns over the
+  push threshold post only to `webhook_url`. An `ntfy_topic` left in a config is
+  ignored.
+
 ### Fixed
 - **The shush-restart bug** (field-reported): stopping speech mid-playback
   killed the player before the speaker, the speaker read that as a playback

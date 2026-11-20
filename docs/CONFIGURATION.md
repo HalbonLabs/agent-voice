@@ -81,9 +81,7 @@ you change these in-session instead; the file sets the machine-wide default.
 | `voice_min_secs` | policy | turns shorter than this are earcon-only outside `always` (default 15, 0 disables) |
 | `voice_earcons` | audio | `0` disables the intent tones |
 | `voice_notify` | reach | `0` disables desktop notifications on problem turns |
-| `ntfy_topic` | reach | an [ntfy](https://ntfy.sh) topic; problem turns over the push threshold buzz your phone |
-| `ntfy_server` | reach | self-hosted ntfy server (default `https://ntfy.sh`) |
-| `webhook_url` | reach | generic JSON webhook for Slack/Discord/Teams shims |
+| `webhook_url` | reach | generic JSON webhook for Slack/Discord/Teams shims; problem turns over the push threshold post to it |
 | `voice_push_secs` | reach | minimum turn length before a push (default 120) |
 | `python_cmd` | edge-tts, Kokoro | the interpreter the hooks should use |
 
