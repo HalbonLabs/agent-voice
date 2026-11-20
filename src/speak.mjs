@@ -84,7 +84,7 @@ try {
       renameSync(tmpPath, jobPath);
     } catch { /* fine */ }
     recordDecision(decision, decision.speech);
-    // Push still runs in dry mode when configured: the tests point ntfy at a
+    // Push still runs in dry mode when configured: the tests point the webhook at a
     // local server, and a silent machine can still buzz a phone.
     if (pushing) await pushRemote(job, cfg);
   } else {

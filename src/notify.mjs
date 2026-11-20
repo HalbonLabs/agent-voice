@@ -9,7 +9,6 @@ import { basename } from 'path';
 
 const PROBLEM_INTENTS = new Set(['question', 'blocked', 'failed']);
 const DEFAULT_PUSH_SECS = 120;
-const NTFY_DEFAULT = 'https://ntfy.sh';
 
 export function shouldNotify(job, cfg) {
   if (cfg.voice_notify === '0') return false;
@@ -17,7 +16,7 @@ export function shouldNotify(job, cfg) {
 }
 
 export function shouldPush(job, cfg) {
-  if (!cfg.ntfy_topic && !cfg.webhook_url) return false;
+  if (!cfg.webhook_url) return false;
   if (!PROBLEM_INTENTS.has(job.intent)) return false;
   const threshold = cfg.voice_push_secs === undefined ? DEFAULT_PUSH_SECS : Number(cfg.voice_push_secs);
   return (Number(job.duration) || 0) >= threshold;
@@ -47,30 +46,15 @@ function post(url, body, headers, timeoutMs = 8000) {
   });
 }
 
-// ntfy first (no account, self-hostable, one POST), plus a generic webhook
-// for Slack/Discord/Teams shims. Fire-and-forget with a timeout; a dead
-// server never delays anything the user can hear.
+// A generic JSON webhook, for Slack, Discord or Teams shims. Fire-and-forget
+// with a timeout; a dead server never delays anything the user can hear.
 export async function pushRemote(job, cfg) {
-  const { title, body } = notificationParts(job);
-  const jobs = [];
-  if (cfg.ntfy_topic) {
-    const server = (cfg.ntfy_server || NTFY_DEFAULT).replace(/\/+$/, '');
-    const tags = { question: 'grey_question', blocked: 'no_entry', failed: 'x' }[job.intent] || 'loudspeaker';
-    jobs.push(post(`${server}/${encodeURIComponent(cfg.ntfy_topic)}`, body, {
-      Title: title,
-      Priority: job.intent === 'question' ? 'high' : 'default',
-      Tags: tags,
-      'Content-Type': 'text/plain; charset=utf-8',
-    }));
-  }
-  if (cfg.webhook_url) {
-    jobs.push(post(cfg.webhook_url, JSON.stringify({
-      source: 'agent-voice',
-      intent: job.intent,
-      project: job.cwd ? basename(job.cwd) : '',
-      duration_seconds: Number(job.duration) || 0,
-      text: job.text,
-    }), { 'Content-Type': 'application/json' }));
-  }
-  await Promise.all(jobs);
+  if (!cfg.webhook_url) return;
+  await post(cfg.webhook_url, JSON.stringify({
+    source: 'agent-voice',
+    intent: job.intent,
+    project: job.cwd ? basename(job.cwd) : '',
+    duration_seconds: Number(job.duration) || 0,
+    text: job.text,
+  }), { 'Content-Type': 'application/json' });
 }

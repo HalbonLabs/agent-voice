@@ -1,4 +1,4 @@
-// Phase 5: reach. Gating rules, and the ntfy/webhook POSTs against a local
+// Phase 5: reach. Gating rules, and the webhook POST against a local
 // server so no test touches the network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +15,7 @@ test('notifications fire only on problem intents and can be disabled', () => {
 });
 
 test('push needs a target, a problem intent, and a long turn', () => {
-  const cfg = { ntfy_topic: 't' };
+  const cfg = { webhook_url: 'http://127.0.0.1:1/hook' };
   assert.equal(shouldPush(job(), cfg), true);
   assert.equal(shouldPush(job(), {}), false, 'no target configured');
   assert.equal(shouldPush(job({ intent: 'done' }), cfg), false);
@@ -29,7 +29,7 @@ test('notification parts carry intent and project, and clamp the body', () => {
   assert.equal(p.body.length, 240);
 });
 
-test('pushRemote posts to ntfy and the webhook', async () => {
+test('pushRemote posts to the webhook', async () => {
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = '';
@@ -44,25 +44,19 @@ test('pushRemote posts to ntfy and the webhook', async () => {
 
   try {
     await pushRemote(job({ intent: 'question', text: 'Should I use JWT?' }), {
-      ntfy_topic: 'my-agent',
-      ntfy_server: `http://127.0.0.1:${port}`,
       webhook_url: `http://127.0.0.1:${port}/hook`,
     });
-    assert.equal(seen.length, 2);
-    const ntfy = seen.find(s => s.url === '/my-agent');
-    assert.ok(ntfy, 'ntfy request seen');
-    assert.equal(ntfy.body, 'Should I use JWT?');
-    assert.equal(ntfy.headers.priority, 'high');
-    assert.match(ntfy.headers.title, /question in checkout-api/);
+    assert.equal(seen.length, 1);
     const hook = seen.find(s => s.url === '/hook');
     const payload = JSON.parse(hook.body);
     assert.equal(payload.intent, 'question');
     assert.equal(payload.project, 'checkout-api');
+    assert.equal(payload.text, 'Should I use JWT?');
   } finally {
     server.close();
   }
 });
 
 test('pushRemote survives a dead server without throwing', async () => {
-  await pushRemote(job(), { ntfy_server: 'http://127.0.0.1:1', ntfy_topic: 'x' });
+  await pushRemote(job(), { webhook_url: 'http://127.0.0.1:1/hook' });
 });
